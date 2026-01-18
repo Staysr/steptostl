@@ -5,21 +5,21 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   build-windows-x86:
-    runs-on: windows-2019  # Windows Server 2019，兼容性更好
+    runs-on: windows-2019
     
     steps:
     - name: 📥 Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     
     - name: 🐍 Set up Python 3.8 (x86)
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.8.10'
-        architecture: 'x86'  # 32位，兼容 Windows 7 32位
+        architecture: 'x86'
     
     - name: 📦 Install dependencies
       run: |
@@ -54,7 +54,7 @@ jobs:
       continue-on-error: true
     
     - name: 📤 Upload Windows x86 EXE
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: step2stl-windows7-x86
         path: dist/step2stl.exe
@@ -65,13 +65,13 @@ jobs:
     
     steps:
     - name: 📥 Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     
     - name: 🐍 Set up Python 3.8 (x64)
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.8.10'
-        architecture: 'x64'  # 64位，兼容 Windows 7/10/11 64位
+        architecture: 'x64'
     
     - name: 📦 Install dependencies
       run: |
@@ -106,7 +106,7 @@ jobs:
       continue-on-error: true
     
     - name: 📤 Upload Windows x64 EXE
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: step2stl-windows7-x64
         path: dist/step2stl.exe
