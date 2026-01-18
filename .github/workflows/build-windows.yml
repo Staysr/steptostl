@@ -1,0 +1,113 @@
+name: Build Windows 7 EXE
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build-windows-x86:
+    runs-on: windows-2019  # Windows Server 2019，兼容性更好
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v3
+    
+    - name: 🐍 Set up Python 3.8 (x86)
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.8.10'
+        architecture: 'x86'  # 32位，兼容 Windows 7 32位
+    
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller==4.10
+        pip install pythonocc-core
+        pip install trimesh numpy
+      shell: cmd
+    
+    - name: 🔨 Build EXE with PyInstaller
+      run: |
+        pyinstaller --onefile ^
+          --console ^
+          --name step2stl ^
+          --collect-all OCC ^
+          --hidden-import OCC.Core.STEPControl ^
+          --hidden-import OCC.Core.StlAPI ^
+          --hidden-import OCC.Core.BRepMesh ^
+          --hidden-import OCC.Core.IFSelect ^
+          --hidden-import OCC.Core.Bnd ^
+          --hidden-import OCC.Core.BRepBndLib ^
+          --hidden-import trimesh ^
+          --hidden-import numpy ^
+          step2stl.py
+      shell: cmd
+    
+    - name: 📋 Show build info
+      run: |
+        dir dist
+        dist\step2stl.exe --help
+      shell: cmd
+      continue-on-error: true
+    
+    - name: 📤 Upload Windows x86 EXE
+      uses: actions/upload-artifact@v3
+      with:
+        name: step2stl-windows7-x86
+        path: dist/step2stl.exe
+        retention-days: 30
+  
+  build-windows-x64:
+    runs-on: windows-2019
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v3
+    
+    - name: 🐍 Set up Python 3.8 (x64)
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.8.10'
+        architecture: 'x64'  # 64位，兼容 Windows 7/10/11 64位
+    
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller==4.10
+        pip install pythonocc-core
+        pip install trimesh numpy
+      shell: cmd
+    
+    - name: 🔨 Build EXE with PyInstaller
+      run: |
+        pyinstaller --onefile ^
+          --console ^
+          --name step2stl ^
+          --collect-all OCC ^
+          --hidden-import OCC.Core.STEPControl ^
+          --hidden-import OCC.Core.StlAPI ^
+          --hidden-import OCC.Core.BRepMesh ^
+          --hidden-import OCC.Core.IFSelect ^
+          --hidden-import OCC.Core.Bnd ^
+          --hidden-import OCC.Core.BRepBndLib ^
+          --hidden-import trimesh ^
+          --hidden-import numpy ^
+          step2stl.py
+      shell: cmd
+    
+    - name: 📋 Show build info
+      run: |
+        dir dist
+        dist\step2stl.exe --help
+      shell: cmd
+      continue-on-error: true
+    
+    - name: 📤 Upload Windows x64 EXE
+      uses: actions/upload-artifact@v3
+      with:
+        name: step2stl-windows7-x64
+        path: dist/step2stl.exe
+        retention-days: 30
