@@ -24,9 +24,25 @@ jobs:
     - name: 📦 Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pyinstaller==4.10
-        pip install pythonocc-core
-        pip install trimesh numpy
+        pip install pyinstaller==5.13.2
+        pip install numpy==1.24.3
+        pip install trimesh==3.23.5
+        pip install pythonocc-core==7.5.1
+      shell: cmd
+    
+    - name: 🔍 Check installations
+      run: |
+        python -c "import OCC.Core.STEPControl; print('OCC import OK')"
+        python -c "import sys; print(sys.path)"
+      shell: cmd
+      continue-on-error: true
+    
+    - name: 📝 Create PyInstaller hook for OCC
+      run: |
+        mkdir hooks
+        echo from PyInstaller.utils.hooks import collect_submodules, collect_data_files > hooks/hook-OCC.py
+        echo hiddenimports = collect_submodules('OCC') >> hooks/hook-OCC.py
+        echo datas = collect_data_files('OCC', include_py_files=True) >> hooks/hook-OCC.py
       shell: cmd
     
     - name: 🔨 Build EXE with PyInstaller
@@ -34,21 +50,27 @@ jobs:
         pyinstaller --onefile ^
           --console ^
           --name step2stl ^
-          --collect-all OCC ^
-          --hidden-import OCC.Core.STEPControl ^
-          --hidden-import OCC.Core.StlAPI ^
-          --hidden-import OCC.Core.BRepMesh ^
-          --hidden-import OCC.Core.IFSelect ^
-          --hidden-import OCC.Core.Bnd ^
-          --hidden-import OCC.Core.BRepBndLib ^
-          --hidden-import trimesh ^
-          --hidden-import numpy ^
+          --additional-hooks-dir=hooks ^
+          --hidden-import=OCC.Core.STEPControl ^
+          --hidden-import=OCC.Core.StlAPI ^
+          --hidden-import=OCC.Core.BRepMesh ^
+          --hidden-import=OCC.Core.IFSelect ^
+          --hidden-import=OCC.Core.Bnd ^
+          --hidden-import=OCC.Core.BRepBndLib ^
+          --hidden-import=OCC.Core.TopoDS ^
+          --hidden-import=OCC.Core.TopAbs ^
+          --hidden-import=OCC.Core.gp ^
+          --hidden-import=trimesh ^
+          --hidden-import=numpy ^
+          --collect-submodules=OCC.Core ^
+          --copy-metadata=pythonocc-core ^
           step2stl.py
       shell: cmd
     
     - name: 📋 Show build info
       run: |
         dir dist
+        echo Testing executable...
         dist\step2stl.exe --help
       shell: cmd
       continue-on-error: true
@@ -76,9 +98,25 @@ jobs:
     - name: 📦 Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pyinstaller==4.10
-        pip install pythonocc-core
-        pip install trimesh numpy
+        pip install pyinstaller==5.13.2
+        pip install numpy==1.24.3
+        pip install trimesh==3.23.5
+        pip install pythonocc-core==7.5.1
+      shell: cmd
+    
+    - name: 🔍 Check installations
+      run: |
+        python -c "import OCC.Core.STEPControl; print('OCC import OK')"
+        python -c "import sys; print(sys.path)"
+      shell: cmd
+      continue-on-error: true
+    
+    - name: 📝 Create PyInstaller hook for OCC
+      run: |
+        mkdir hooks
+        echo from PyInstaller.utils.hooks import collect_submodules, collect_data_files > hooks/hook-OCC.py
+        echo hiddenimports = collect_submodules('OCC') >> hooks/hook-OCC.py
+        echo datas = collect_data_files('OCC', include_py_files=True) >> hooks/hook-OCC.py
       shell: cmd
     
     - name: 🔨 Build EXE with PyInstaller
@@ -86,21 +124,27 @@ jobs:
         pyinstaller --onefile ^
           --console ^
           --name step2stl ^
-          --collect-all OCC ^
-          --hidden-import OCC.Core.STEPControl ^
-          --hidden-import OCC.Core.StlAPI ^
-          --hidden-import OCC.Core.BRepMesh ^
-          --hidden-import OCC.Core.IFSelect ^
-          --hidden-import OCC.Core.Bnd ^
-          --hidden-import OCC.Core.BRepBndLib ^
-          --hidden-import trimesh ^
-          --hidden-import numpy ^
+          --additional-hooks-dir=hooks ^
+          --hidden-import=OCC.Core.STEPControl ^
+          --hidden-import=OCC.Core.StlAPI ^
+          --hidden-import=OCC.Core.BRepMesh ^
+          --hidden-import=OCC.Core.IFSelect ^
+          --hidden-import=OCC.Core.Bnd ^
+          --hidden-import=OCC.Core.BRepBndLib ^
+          --hidden-import=OCC.Core.TopoDS ^
+          --hidden-import=OCC.Core.TopAbs ^
+          --hidden-import=OCC.Core.gp ^
+          --hidden-import=trimesh ^
+          --hidden-import=numpy ^
+          --collect-submodules=OCC.Core ^
+          --copy-metadata=pythonocc-core ^
           step2stl.py
       shell: cmd
     
     - name: 📋 Show build info
       run: |
         dir dist
+        echo Testing executable...
         dist\step2stl.exe --help
       shell: cmd
       continue-on-error: true
