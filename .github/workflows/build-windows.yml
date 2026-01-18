@@ -8,80 +8,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-windows-x86:
-    runs-on: windows-2019
-    
-    steps:
-    - name: 📥 Checkout code
-      uses: actions/checkout@v4
-    
-    - name: 🐍 Set up Python 3.8 (x86)
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.8.10'
-        architecture: 'x86'
-    
-    - name: 📦 Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pyinstaller==5.13.2
-        pip install numpy==1.24.3
-        pip install trimesh==3.23.5
-        pip install pythonocc-core==7.5.1
-      shell: cmd
-    
-    - name: 🔍 Check installations
-      run: |
-        python -c "import OCC.Core.STEPControl; print('OCC import OK')"
-        python -c "import sys; print(sys.path)"
-      shell: cmd
-      continue-on-error: true
-    
-    - name: 📝 Create PyInstaller hook for OCC
-      run: |
-        mkdir hooks
-        echo from PyInstaller.utils.hooks import collect_submodules, collect_data_files > hooks/hook-OCC.py
-        echo hiddenimports = collect_submodules('OCC') >> hooks/hook-OCC.py
-        echo datas = collect_data_files('OCC', include_py_files=True) >> hooks/hook-OCC.py
-      shell: cmd
-    
-    - name: 🔨 Build EXE with PyInstaller
-      run: |
-        pyinstaller --onefile ^
-          --console ^
-          --name step2stl ^
-          --additional-hooks-dir=hooks ^
-          --hidden-import=OCC.Core.STEPControl ^
-          --hidden-import=OCC.Core.StlAPI ^
-          --hidden-import=OCC.Core.BRepMesh ^
-          --hidden-import=OCC.Core.IFSelect ^
-          --hidden-import=OCC.Core.Bnd ^
-          --hidden-import=OCC.Core.BRepBndLib ^
-          --hidden-import=OCC.Core.TopoDS ^
-          --hidden-import=OCC.Core.TopAbs ^
-          --hidden-import=OCC.Core.gp ^
-          --hidden-import=trimesh ^
-          --hidden-import=numpy ^
-          --collect-submodules=OCC.Core ^
-          --copy-metadata=pythonocc-core ^
-          step2stl.py
-      shell: cmd
-    
-    - name: 📋 Show build info
-      run: |
-        dir dist
-        echo Testing executable...
-        dist\step2stl.exe --help
-      shell: cmd
-      continue-on-error: true
-    
-    - name: 📤 Upload Windows x86 EXE
-      uses: actions/upload-artifact@v4
-      with:
-        name: step2stl-windows7-x86
-        path: dist/step2stl.exe
-        retention-days: 30
-  
   build-windows-x64:
     runs-on: windows-2019
     
@@ -89,64 +15,41 @@ jobs:
     - name: 📥 Checkout code
       uses: actions/checkout@v4
     
-    - name: 🐍 Set up Python 3.8 (x64)
-      uses: actions/setup-python@v5
+    - name: 🐍 Setup Miniconda (x64)
+      uses: conda-incubator/setup-miniconda@v3
       with:
-        python-version: '3.8.10'
-        architecture: 'x64'
+        auto-update-conda: true
+        python-version: 3.8
+        architecture: x64
+        channels: conda-forge,defaults
+        channel-priority: strict
     
-    - name: 📦 Install dependencies
+    - name: 📦 Install dependencies via Conda
+      shell: bash -el {0}
       run: |
-        python -m pip install --upgrade pip
+        conda install -y -c conda-forge pythonocc-core=7.7.2
         pip install pyinstaller==5.13.2
-        pip install numpy==1.24.3
         pip install trimesh==3.23.5
-        pip install pythonocc-core==7.5.1
-      shell: cmd
     
     - name: 🔍 Check installations
+      shell: bash -el {0}
       run: |
-        python -c "import OCC.Core.STEPControl; print('OCC import OK')"
-        python -c "import sys; print(sys.path)"
-      shell: cmd
+        python -c "import OCC.Core.STEPControl; print('✅ OCC import OK')"
+        python -c "import trimesh; print('✅ trimesh import OK')"
+        python -c "import numpy; print('✅ numpy import OK')"
       continue-on-error: true
     
-    - name: 📝 Create PyInstaller hook for OCC
-      run: |
-        mkdir hooks
-        echo from PyInstaller.utils.hooks import collect_submodules, collect_data_files > hooks/hook-OCC.py
-        echo hiddenimports = collect_submodules('OCC') >> hooks/hook-OCC.py
-        echo datas = collect_data_files('OCC', include_py_files=True) >> hooks/hook-OCC.py
-      shell: cmd
-    
     - name: 🔨 Build EXE with PyInstaller
+      shell: bash -el {0}
       run: |
-        pyinstaller --onefile ^
-          --console ^
-          --name step2stl ^
-          --additional-hooks-dir=hooks ^
-          --hidden-import=OCC.Core.STEPControl ^
-          --hidden-import=OCC.Core.StlAPI ^
-          --hidden-import=OCC.Core.BRepMesh ^
-          --hidden-import=OCC.Core.IFSelect ^
-          --hidden-import=OCC.Core.Bnd ^
-          --hidden-import=OCC.Core.BRepBndLib ^
-          --hidden-import=OCC.Core.TopoDS ^
-          --hidden-import=OCC.Core.TopAbs ^
-          --hidden-import=OCC.Core.gp ^
-          --hidden-import=trimesh ^
-          --hidden-import=numpy ^
-          --collect-submodules=OCC.Core ^
-          --copy-metadata=pythonocc-core ^
-          step2stl.py
-      shell: cmd
+        pyinstaller step2stl.spec
     
     - name: 📋 Show build info
+      shell: bash -el {0}
       run: |
-        dir dist
-        echo Testing executable...
-        dist\step2stl.exe --help
-      shell: cmd
+        ls -lh dist/
+        echo "Testing executable..."
+        ./dist/step2stl.exe --help || true
       continue-on-error: true
     
     - name: 📤 Upload Windows x64 EXE

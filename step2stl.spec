@@ -1,14 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files, collect_dynamic_libs
 
-# 收集 OCC 所有子模块
-hiddenimports = collect_submodules('OCC')
+# 收集所有必要的模块
+hiddenimports = []
+hiddenimports += collect_submodules('OCC')
 hiddenimports += collect_submodules('trimesh')
-hiddenimports += collect_submodules('numpy')
+hiddenimports += ['numpy', 'numpy.core', 'numpy.core._multiarray_umath']
 
 # 收集 OCC 数据文件和动态库
-datas = collect_data_files('OCC', include_py_files=True)
-binaries = collect_dynamic_libs('OCC')
+datas = []
+datas += collect_data_files('OCC', include_py_files=True)
+
+binaries = []
+binaries += collect_dynamic_libs('OCC')
 
 a = Analysis(
     ['step2stl.py'],
@@ -19,7 +23,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['tkinter', 'matplotlib', 'PIL'],  # 排除不需要的模块
     noarchive=False,
 )
 
