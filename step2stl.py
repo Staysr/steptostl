@@ -119,75 +119,97 @@ class StepToStlConverter:
         return deflection, max_dim, dimensions
     
     def optimize_stl(self, stl_path: Path) -> Optional[Path]: 
-        """ 
-        优化STL文件（去除重复顶点，减小文件） 
+    """ 
+    优化STL文件（去除重复顶点，减小文件） 
+    
+    Args: 
+        stl_path: STL文件路径
         
-        Args: 
-            stl_path: STL文件路径
-            
-        Returns: 
-            Path: 优化后的文件路径，失败返回None
-        """ 
-        if not TRIMESH_AVAILABLE: 
-            print("⚠️  警告: 未安装trimesh，跳过优化", file=sys.stderr) 
-            print("   安装命令: pip install trimesh", file=sys.stderr) 
-            return None
+    Returns: 
+        Path: 优化后的文件路径，失败返回None
+    """ 
+    if not TRIMESH_AVAILABLE: 
+        print("⚠️  警告: 未安装trimesh，跳过优化", file=sys.stderr) 
+        print("   安装命令: pip install trimesh", file=sys.stderr) 
+        return None
+    
+    try: 
+        print("🔧 [优化] 加载STL网格...", end='', flush=True) 
+        original_size = stl_path.stat().st_size / (1024 * 1024) 
         
-        try: 
-            print("🔧 [优化] 加载STL网格...", end='', flush=True) 
-            original_size = stl_path.stat().st_size / (1024 * 1024) 
-            
-            # 加载STL（使用process=False避免自动处理，节省内存）
-            mesh = trimesh.load_mesh(str(stl_path), process=False) 
-            print(" ✓") 
-            
-            # 统计原始信息
-            original_vertices = len(mesh.vertices) 
-            original_faces = len(mesh.faces) 
-            
-            print(f"🔧 [优化] 原始网格: {original_vertices:,} 顶点, {original_faces:,} 三角面") 
-            
-            # 去除重复顶点
-            print("🔧 [优化] 合并重复顶点...", end='', flush=True) 
-            mesh.merge_vertices() 
-            print(" ✓") 
-            
-            # 去除退化面
-            print("🔧 [优化] 清理退化面...", end='', flush=True) 
-            mesh.remove_degenerate_faces() 
-            print(" ✓") 
-            
-            # 去除重复面
-            print("🔧 [优化] 去除重复面...", end='', flush=True) 
-            mesh.remove_duplicate_faces() 
-            print(" ✓") 
-            
-            # 统计优化后信息
-            optimized_vertices = len(mesh.vertices) 
-            optimized_faces = len(mesh.faces) 
-            
-            vertex_reduction = (1 - optimized_vertices / original_vertices) * 100
-            face_reduction = (1 - optimized_faces / original_faces) * 100
-            
-            print(f"🔧 [优化] 优化后: {optimized_vertices:,} 顶点 (↓{vertex_reduction:.1f}%), " 
-                  f"{optimized_faces:,} 三角面 (↓{face_reduction:.1f}%)") 
-            
-            # 保存优化后的STL（覆盖原文件） 
-            print("🔧 [优化] 保存优化后的STL...", end='', flush=True) 
-            mesh.export(str(stl_path)) 
-            print(" ✓") 
-            
-            optimized_size = stl_path.stat().st_size / (1024 * 1024) 
-            size_reduction = (1 - optimized_size / original_size) * 100
-            
-            print(f"✅ [优化] 文件大小: {original_size:.2f} MB → {optimized_size:.2f} MB " 
-                  f"(↓{size_reduction:.1f}%)") 
-            
-            return stl_path
-            
-        except Exception as e: 
-            print(f"\n⚠️  警告: STL优化失败 - {str(e)}", file=sys.stderr) 
-            return None
+        # 加载STL（使用process=False避免自动处理，节省内存）
+        mesh = trimesh.load_mesh(str(stl_path), process=False) 
+        print(" ✓") 
+        
+        # 统计原始信息
+        original_vertices = len(mesh.vertices) 
+        original_faces = len(mesh.faces) 
+        
+        print(f"🔧 [优化] 原始网格: {original_vertices:,} 顶点, {original_faces:,} 三角面") 
+        
+        # 1. 合并重复顶点（这是最主要的优化）
+        print("🔧 [优化] 合并重复顶点...", end='', flush=True) 
+        mesh.merge_vertices() 
+        print(" ✓") 
+        
+        # 2. 移除未引用的顶点（兼容性更好）
+        print("🔧 [优化] 清理未使用顶点...", end='', flush=True) 
+        mesh.remove_unreferenced_vertices() 
+        print(" ✓") 
+        
+        # 3. 移除退化面（使用兼容的方法）
+        print("🔧 [优化] 清理无效面...", end='', flush=True) 
+        # 方法1：使用面积过滤（兼容所有版本）
+        if hasattr(mesh, 'remove_degenerate_faces'):
+            # 新版本trimesh
+            mesh.remove_degenerate_faces()
+        else:
+            # 旧版本trimesh - 手动过滤零面积三角形
+            valid_faces = mesh.area_faces > 1e-10  # 面积阈值
+            if not all(valid_faces):
+                mesh.update_faces(valid_faces)
+        print(" ✓") 
+        
+        # 4. 移除重复面（使用兼容的方法）
+        print("🔧 [优化] 去除重复面...", end='', flush=True) 
+        if hasattr(mesh, 'remove_duplicate_faces'):
+            # 新版本trimesh
+            mesh.remove_duplicate_faces()
+        else:
+            # 旧版本trimesh - 使用unique方法
+            unique_faces = trimesh.grouping.unique_rows(mesh.faces)[0]
+            if len(unique_faces) < len(mesh.faces):
+                mesh.update_faces(mesh.faces[unique_faces])
+        print(" ✓") 
+        
+        # 统计优化后信息
+        optimized_vertices = len(mesh.vertices) 
+        optimized_faces = len(mesh.faces) 
+        
+        vertex_reduction = (1 - optimized_vertices / original_vertices) * 100 if original_vertices > 0 else 0
+        face_reduction = (1 - optimized_faces / original_faces) * 100 if original_faces > 0 else 0
+        
+        print(f"🔧 [优化] 优化后: {optimized_vertices:,} 顶点 (↓{vertex_reduction:.1f}%), " 
+              f"{optimized_faces:,} 三角面 (↓{face_reduction:.1f}%)") 
+        
+        # 保存优化后的STL（覆盖原文件） 
+        print("🔧 [优化] 保存优化后的STL...", end='', flush=True) 
+        mesh.export(str(stl_path)) 
+        print(" ✓") 
+        
+        optimized_size = stl_path.stat().st_size / (1024 * 1024) 
+        size_reduction = (1 - optimized_size / original_size) * 100 if original_size > 0 else 0
+        
+        print(f"✅ [优化] 文件大小: {original_size:.2f} MB → {optimized_size:.2f} MB " 
+              f"(↓{size_reduction:.1f}%)") 
+        
+        return stl_path
+        
+    except Exception as e: 
+        print(f"\n⚠️  警告: STL优化失败 - {str(e)}", file=sys.stderr) 
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return None
     
     def export_glb(self, stl_path: Path, glb_path: Optional[Path] = None) -> Optional[Path]: 
         """ 
