@@ -137,7 +137,7 @@ class StepToStlConverter:
             print("🔧 [优化] 加载STL网格...", end='', flush=True) 
             original_size = stl_path.stat().st_size / (1024 * 1024) 
             
-            # 加载STL（使用process=False避免自动处理，节省内存）
+            # 加载STL（使用process=False避免自动处理）
             mesh = trimesh.load_mesh(str(stl_path), process=False) 
             print(" ✓") 
             
@@ -147,36 +147,47 @@ class StepToStlConverter:
             
             print(f"🔧 [优化] 原始网格: {original_vertices:,} 顶点, {original_faces:,} 三角面") 
             
-            # 1. 合并重复顶点（这是最主要的优化）
+            # 1. 合并重复顶点（最主要的优化）
             print("🔧 [优化] 合并重复顶点...", end='', flush=True) 
             mesh.merge_vertices() 
             print(" ✓") 
             
-            # 2. 移除未引用的顶点（兼容性更好）
+            # 2. 移除未引用的顶点
             print("🔧 [优化] 清理未使用顶点...", end='', flush=True) 
             mesh.remove_unreferenced_vertices() 
             print(" ✓") 
             
-            # 3. 移除退化面（使用兼容的方法）
+            # 3. 移除退化面（使用新API）
             print("🔧 [优化] 清理无效面...", end='', flush=True) 
-            # 方法1：使用面积过滤（兼容所有版本）
-            if hasattr(mesh, 'remove_degenerate_faces'):
-                # 新版本trimesh
-                mesh.remove_degenerate_faces()
+            if hasattr(mesh, 'nondegenerate_faces'):
+                # 新版本 API
+                mesh.update_faces(mesh.nondegenerate_faces())
+            elif hasattr(mesh, 'remove_degenerate_faces'):
+                # 旧版本 API（已弃用但还能用）
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", DeprecationWarning)
+                    mesh.remove_degenerate_faces()
             else:
-                # 旧版本trimesh - 手动过滤零面积三角形
-                valid_faces = mesh.area_faces > 1e-10  # 面积阈值
+                # 手动过滤
+                valid_faces = mesh.area_faces > 1e-10
                 if not all(valid_faces):
                     mesh.update_faces(valid_faces)
             print(" ✓") 
             
-            # 4. 移除重复面（使用兼容的方法）
+            # 4. 移除重复面（使用新API）
             print("🔧 [优化] 去除重复面...", end='', flush=True) 
-            if hasattr(mesh, 'remove_duplicate_faces'):
-                # 新版本trimesh
-                mesh.remove_duplicate_faces()
+            if hasattr(mesh, 'unique_faces'):
+                # 新版本 API
+                mesh.update_faces(mesh.unique_faces())
+            elif hasattr(mesh, 'remove_duplicate_faces'):
+                # 旧版本 API（已弃用但还能用）
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", DeprecationWarning)
+                    mesh.remove_duplicate_faces()
             else:
-                # 旧版本trimesh - 使用unique方法
+                # 手动去重
                 unique_faces = trimesh.grouping.unique_rows(mesh.faces)[0]
                 if len(unique_faces) < len(mesh.faces):
                     mesh.update_faces(mesh.faces[unique_faces])
@@ -192,10 +203,48 @@ class StepToStlConverter:
             print(f"🔧 [优化] 优化后: {optimized_vertices:,} 顶点 (↓{vertex_reduction:.1f}%), " 
                   f"{optimized_faces:,} 三角面 (↓{face_reduction:.1f}%)") 
             
-            # 保存优化后的STL（覆盖原文件） 
+            # 🔧 简化版验证：只检查基本有效性
+            print("🔧 [优化] 验证网格...", end='', flush=True)
+            
+            # 检查面索引是否有效
+            max_index = len(mesh.vertices) - 1
+            if len(mesh.faces) > 0 and mesh.faces.max() > max_index:
+                print(f"\n⚠️  警告: 检测到无效的面索引，跳过优化", file=sys.stderr)
+                return None
+            
+            # 检查是否有面
+            if len(mesh.faces) == 0:
+                print(f"\n⚠️  警告: 优化后没有三角面，跳过优化", file=sys.stderr)
+                return None
+            
+            print(" ✓")
+            
+            # 保存优化后的STL（使用临时文件防止数据丢失）
             print("🔧 [优化] 保存优化后的STL...", end='', flush=True) 
-            mesh.export(str(stl_path)) 
-            print(" ✓") 
+            
+            # 🔧 修复：使用 _temp.stl 而不是 .stl.tmp（保持 .stl 后缀）
+            temp_path = stl_path.parent / f"{stl_path.stem}_temp.stl"
+            
+            try:
+                # 显式指定文件类型为 stl
+                mesh.export(str(temp_path), file_type='stl')
+                
+                # 验证导出的文件
+                if temp_path.exists() and temp_path.stat().st_size > 0:
+                    # 成功，替换原文件
+                    temp_path.replace(stl_path)
+                    print(" ✓") 
+                else:
+                    print(f"\n⚠️  警告: 导出的文件无效，保留原始文件", file=sys.stderr)
+                    if temp_path.exists():
+                        temp_path.unlink()
+                    return None
+                    
+            except Exception as export_error:
+                print(f"\n⚠️  警告: 导出失败 - {str(export_error)}", file=sys.stderr)
+                if temp_path.exists():
+                    temp_path.unlink()
+                return None
             
             optimized_size = stl_path.stat().st_size / (1024 * 1024) 
             size_reduction = (1 - optimized_size / original_size) * 100 if original_size > 0 else 0
@@ -204,7 +253,7 @@ class StepToStlConverter:
                   f"(↓{size_reduction:.1f}%)") 
             
             return stl_path
-        
+            
         except Exception as e: 
             print(f"\n⚠️  警告: STL优化失败 - {str(e)}", file=sys.stderr) 
             import traceback
