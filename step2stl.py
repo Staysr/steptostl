@@ -205,11 +205,11 @@ class StepToStlConverter:
             
             return stl_path
         
-    except Exception as e: 
-        print(f"\n⚠️  警告: STL优化失败 - {str(e)}", file=sys.stderr) 
-        import traceback
-        traceback.print_exc(file=sys.stderr)
-        return None
+        except Exception as e: 
+            print(f"\n⚠️  警告: STL优化失败 - {str(e)}", file=sys.stderr) 
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            return None
     
     def export_glb(self, stl_path: Path, glb_path: Optional[Path] = None) -> Optional[Path]: 
         """ 
