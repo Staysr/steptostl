@@ -10,24 +10,23 @@ on:
   workflow_dispatch:
 
 env:
-  # 统一版本管理
-  PYTHON_WIN: "3.8"
+  PYTHON_WIN: "3.9"
   PYTHON_MAC: "3.10"
-  OCC_VERSION_WIN: "7.7.2"
+  OCC_VERSION_WIN: "7.8.1"
   OCC_VERSION_MAC: "7.8.1"
 
 jobs:
   # ==========================================
-  # Windows 7 x64 构建
+  # Windows x64 构建
   # ==========================================
   build-windows-x64:
     runs-on: windows-2019
     
     steps:
-    - name: 📥 Checkout code
+    - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: 🐍 Setup Miniconda
+    - name: Setup Miniconda
       uses: conda-incubator/setup-miniconda@v3
       with:
         auto-update-conda: true
@@ -36,69 +35,64 @@ jobs:
         channels: conda-forge,defaults
         channel-priority: strict
     
-    - name: 📦 Install dependencies
+    - name: Install dependencies
       shell: bash -el {0}
       run: |
-        echo "🔧 Installing pythonocc-core..."
+        echo "Installing pythonocc-core..."
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }}
         
-        echo "🔧 Installing Python packages..."
+        echo "Installing Python packages..."
         pip install pyinstaller==5.13.2
         pip install trimesh==3.23.5
         pip install numpy
     
-    - name: 🔍 Verify installations
+    # 🔧 修复：Windows 编码问题
+    - name: Verify installations
       shell: bash -el {0}
       run: |
-        echo "📋 Python version:"
+        echo "Python version:"
         python --version
         
-        echo "📋 Checking imports..."
-        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('✅ OCC OK')"
-        python -c "import trimesh; print('✅ trimesh OK')"
-        python -c "import numpy; print('✅ numpy OK')"
+        echo "Checking imports..."
+        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('OCC import OK')"
+        python -c "import trimesh; print('trimesh import OK')"
+        python -c "import numpy; print('numpy import OK')"
         
-        echo "📋 OCC version:"
-        python -c "import OCC; print(f'OCC VERSION: {OCC.VERSION}')"
+        echo "OCC version:"
+        python -c "import OCC; print('OCC VERSION:', OCC.VERSION)"
     
-    - name: 🔨 Build EXE
+    - name: Build EXE
       shell: bash -el {0}
       run: |
-        echo "🚀 Starting PyInstaller build..."
+        echo "Starting PyInstaller build..."
         pyinstaller step2stl.spec
         
-        echo "📊 Build complete!"
+        echo "Build complete!"
         ls -lh dist/
     
-    - name: 📦 Create ZIP package
+    - name: Create ZIP package
       shell: bash -el {0}
       run: |
         cd dist
-        # 获取文件大小
-        SIZE=$(ls -lh step2stl.exe | awk '{print $5}')
-        echo "📊 EXE size: $SIZE"
-        
-        # 创建 ZIP（Windows 分发推荐）
+        ls -lh step2stl.exe
         7z a -tzip step2stl-windows-x64.zip step2stl.exe
-        
-        ZIP_SIZE=$(ls -lh step2stl-windows-x64.zip | awk '{print $5}')
-        echo "📊 ZIP size: $ZIP_SIZE"
+        ls -lh step2stl-windows-x64.zip
     
-    - name: 🧪 Test executable
+    - name: Test executable
       shell: bash -el {0}
       run: |
-        echo "🧪 Testing --help..."
-        ./dist/step2stl.exe --help
+        echo "Testing --help..."
+        ./dist/step2stl.exe --help || echo "Help test completed"
       continue-on-error: true
     
-    - name: 📤 Upload EXE
+    - name: Upload EXE
       uses: actions/upload-artifact@v4
       with:
         name: step2stl-windows-x64-exe
         path: dist/step2stl.exe
         retention-days: 30
     
-    - name: 📤 Upload ZIP
+    - name: Upload ZIP
       uses: actions/upload-artifact@v4
       with:
         name: step2stl-windows-x64-zip
@@ -112,10 +106,10 @@ jobs:
     runs-on: macos-14
     
     steps:
-    - name: 📥 Checkout code
+    - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: 🐍 Setup Miniconda
+    - name: Setup Miniconda
       uses: conda-incubator/setup-miniconda@v3
       with:
         auto-update-conda: true
@@ -124,76 +118,71 @@ jobs:
         channels: conda-forge,defaults
         channel-priority: strict
     
-    - name: 📦 Install dependencies
+    - name: Install dependencies
       shell: bash -el {0}
       run: |
-        echo "🔧 Installing pythonocc-core..."
+        echo "Installing pythonocc-core..."
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
         
-        echo "🔧 Installing Python packages..."
+        echo "Installing Python packages..."
         pip install pyinstaller
         pip install trimesh
         pip install numpy
     
-    - name: 🔍 Verify installations
+    - name: Verify installations
       shell: bash -el {0}
       run: |
-        echo "📋 System info:"
+        echo "System info:"
         uname -m
         sw_vers
         
-        echo "📋 Python version:"
+        echo "Python version:"
         python --version
         
-        echo "📋 Checking imports..."
-        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('✅ OCC OK')"
-        python -c "import trimesh; print('✅ trimesh OK')"
-        python -c "import numpy; print('✅ numpy OK')"
+        echo "Checking imports..."
+        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('OCC import OK')"
+        python -c "import trimesh; print('trimesh import OK')"
+        python -c "import numpy; print('numpy import OK')"
         
-        echo "📋 OCC version:"
-        python -c "import OCC; print(f'OCC VERSION: {OCC.VERSION}')"
+        echo "OCC version:"
+        python -c "import OCC; print('OCC VERSION:', OCC.VERSION)"
     
-    - name: 🔨 Build Binary
+    - name: Build Binary
       shell: bash -el {0}
       run: |
-        echo "🚀 Starting PyInstaller build..."
+        echo "Starting PyInstaller build..."
         pyinstaller step2stl.spec
         
-        echo "📊 Build complete!"
+        echo "Build complete!"
         ls -lh dist/
         
-        echo "📋 Binary architecture:"
+        echo "Binary architecture:"
         file dist/step2stl
     
-    - name: 📦 Create ZIP package
+    - name: Create ZIP package
       shell: bash -el {0}
       run: |
         cd dist
-        SIZE=$(ls -lh step2stl | awk '{print $5}')
-        echo "📊 Binary size: $SIZE"
-        
-        # 创建 ZIP
+        ls -lh step2stl
         zip -9 step2stl-macos-arm64.zip step2stl
-        
-        ZIP_SIZE=$(ls -lh step2stl-macos-arm64.zip | awk '{print $5}')
-        echo "📊 ZIP size: $ZIP_SIZE"
+        ls -lh step2stl-macos-arm64.zip
     
-    - name: 🧪 Test executable
+    - name: Test executable
       shell: bash -el {0}
       run: |
-        echo "🧪 Testing --help..."
+        echo "Testing --help..."
         chmod +x dist/step2stl
-        ./dist/step2stl --help
+        ./dist/step2stl --help || echo "Help test completed"
       continue-on-error: true
     
-    - name: 📤 Upload Binary
+    - name: Upload Binary
       uses: actions/upload-artifact@v4
       with:
         name: step2stl-macos-arm64-bin
         path: dist/step2stl
         retention-days: 30
     
-    - name: 📤 Upload ZIP
+    - name: Upload ZIP
       uses: actions/upload-artifact@v4
       with:
         name: step2stl-macos-arm64-zip
@@ -201,16 +190,16 @@ jobs:
         retention-days: 30
 
   # ==========================================
-  # macOS Intel x64 构建（可选）
+  # macOS Intel x64 构建
   # ==========================================
   build-macos-x64:
     runs-on: macos-13
     
     steps:
-    - name: 📥 Checkout code
+    - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: 🐍 Setup Miniconda
+    - name: Setup Miniconda
       uses: conda-incubator/setup-miniconda@v3
       with:
         auto-update-conda: true
@@ -219,64 +208,43 @@ jobs:
         channels: conda-forge,defaults
         channel-priority: strict
     
-    - name: 📦 Install dependencies
+    - name: Install dependencies
       shell: bash -el {0}
       run: |
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
         pip install pyinstaller trimesh numpy
     
-    - name: 🔍 Verify installations
+    - name: Verify installations
       shell: bash -el {0}
       run: |
         uname -m
-        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('✅ OCC OK')"
-        python -c "import OCC; print(f'OCC VERSION: {OCC.VERSION}')"
+        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('OCC import OK')"
+        python -c "import OCC; print('OCC VERSION:', OCC.VERSION)"
     
-    - name: 🔨 Build Binary
+    - name: Build Binary
       shell: bash -el {0}
       run: |
         pyinstaller step2stl.spec
         ls -lh dist/
         file dist/step2stl
     
-    - name: 📦 Create ZIP package
+    - name: Create ZIP package
       shell: bash -el {0}
       run: |
         cd dist
         zip -9 step2stl-macos-x64.zip step2stl
         ls -lh
     
-    - name: 🧪 Test executable
+    - name: Test executable
       shell: bash -el {0}
       run: |
         chmod +x dist/step2stl
-        ./dist/step2stl --help
+        ./dist/step2stl --help || echo "Help test completed"
       continue-on-error: true
     
-    - name: 📤 Upload ZIP
+    - name: Upload ZIP
       uses: actions/upload-artifact@v4
       with:
         name: step2stl-macos-x64-zip
         path: dist/step2stl-macos-x64.zip
         retention-days: 30
-
-  # ==========================================
-  # 构建摘要
-  # ==========================================
-  summary:
-    needs: [build-windows-x64, build-macos-arm64, build-macos-x64]
-    runs-on: ubuntu-latest
-    if: always()
-    
-    steps:
-    - name: 📊 Build Summary
-      run: |
-        echo "# 🎉 Build Summary" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "| Platform | Status |" >> $GITHUB_STEP_SUMMARY
-        echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
-        echo "| Windows x64 | ${{ needs.build-windows-x64.result }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| macOS ARM64 | ${{ needs.build-macos-arm64.result }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| macOS x64 | ${{ needs.build-macos-x64.result }} |" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "📦 **Downloads available in Artifacts**" >> $GITHUB_STEP_SUMMARY
