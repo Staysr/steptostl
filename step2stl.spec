@@ -1,59 +1,141 @@
-# -*- mode: python ; coding: utf-8 -*- 
+# -*- mode: python ; coding: utf-8 -*-
+"""
+step2stl PyInstaller 打包配置
+优化目标：减小体积、提高兼容性
+"""
+
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files, collect_dynamic_libs
+import sys
 
-# 收集所有必要的模块
-hiddenimports = [] 
-hiddenimports += collect_submodules('OCC') 
-hiddenimports += collect_submodules('trimesh') 
-hiddenimports += ['numpy', 'numpy.core', 'numpy.core._multiarray_umath'] 
+# ==========================================
+# 收集必要模块
+# ==========================================
+hiddenimports = []
 
-# 收集 OCC 数据文件和动态库
-datas = [] 
-datas += collect_data_files('OCC', include_py_files=True) 
+# OCC 核心模块（只收集必要的）
+hiddenimports += [
+    'OCC.Core.STEPControl',
+    'OCC.Core.StlAPI',
+    'OCC.Core.BRepMesh',
+    'OCC.Core.IFSelect',
+    'OCC.Core.Bnd',
+    'OCC.Core.BRepBndLib',
+    'OCC.Core.TopoDS',
+    'OCC.Core.TopAbs',
+    'OCC.Core.gp',
+]
 
-binaries = [] 
-binaries += collect_dynamic_libs('OCC') 
-  # 🚀 排除更多不需要的模块
-a = Analysis( 
-    ['step2stl.py'], 
-    pathex=[], 
-    binaries=binaries, 
-    datas=datas, 
-    hiddenimports=hiddenimports, 
-    hookspath=[], 
-    hooksconfig={}, 
-    runtime_hooks=[], 
-    excludes=[
-        'tkinter', 'matplotlib', 'PIL', 
-        'IPython', 'jupyter', 'notebook',
-        'pandas', 'scipy', 'sklearn',
-        'tornado', 'zmq', 'jinja2',
-        '_tkinter', 'tcl', 'tk'
-    ],
-    noarchive=False, 
-) 
+# trimesh 模块
+hiddenimports += collect_submodules('trimesh')
 
-pyz = PYZ(a.pure) 
+# numpy 核心
+hiddenimports += [
+    'numpy',
+    'numpy.core',
+    'numpy.core._multiarray_umath',
+    'numpy.core.multiarray',
+    'numpy.random',
+]
 
- # 🚀 启用UPX压缩
-exe = EXE( 
-    pyz, 
-    a.scripts, 
-    a.binaries, 
-    a.datas, 
-    [], 
-    name='step2stl', 
-    debug=False, 
-    bootloader_ignore_signals=False, 
-    strip=False, 
-    upx=True,
-    upx_exclude=[], 
-    runtime_tmpdir=None, 
-    console=True, 
-    disable_windowed_traceback=False, 
-    argv_emulation=False, 
-    target_arch=None, 
-    codesign_identity=None, 
-    entitlements_file=None, 
-    icon=None
+# ==========================================
+# 收集数据文件和动态库
+# ==========================================
+datas = []
+datas += collect_data_files('OCC', include_py_files=True)
+
+binaries = []
+binaries += collect_dynamic_libs('OCC')
+
+# ==========================================
+# 排除不需要的模块（减小体积）
+# ==========================================
+excludes = [
+    # GUI 相关
+    'tkinter', '_tkinter', 'tcl', 'tk',
+    'PyQt5', 'PyQt6', 'PySide2', 'PySide6',
+    'wx', 'gtk',
+    
+    # 科学计算（不需要）
+    'matplotlib', 'PIL', 'pillow',
+    'pandas', 'scipy', 'sklearn', 'scikit-learn',
+    
+    # Jupyter 相关
+    'IPython', 'jupyter', 'notebook', 'jupyterlab',
+    
+    # 网络相关
+    'tornado', 'zmq', 'jinja2', 'flask', 'django',
+    
+    # 测试相关
+    'pytest', 'unittest', 'nose',
+    
+    # 其他
+    'setuptools', 'pkg_resources',
+    'email', 'html', 'http', 'xmlrpc',
+    'pydoc', 'doctest',
+]
+
+# ==========================================
+# Analysis 配置
+# ==========================================
+a = Analysis(
+    ['step2stl.py'],
+    pathex=[],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=excludes,
+    noarchive=False,
+)
+
+# ==========================================
+# 过滤不必要的二进制文件（进一步减小体积）
+# ==========================================
+# 移除调试符号和测试文件
+def filter_binaries(binaries):
+    filtered = []
+    exclude_patterns = [
+        'test', 'tests', 'testing',
+        'example', 'examples',
+        'doc', 'docs',
+        '.pdb',  # Windows 调试符号
+    ]
+    for name, path, type_ in binaries:
+        name_lower = name.lower()
+        if not any(pattern in name_lower for pattern in exclude_patterns):
+            filtered.append((name, path, type_))
+    return filtered
+
+a.binaries = filter_binaries(a.binaries)
+
+# ==========================================
+# PYZ 配置
+# ==========================================
+pyz = PYZ(a.pure)
+
+# ==========================================
+# EXE 配置
+# ==========================================
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
+    [],
+    name='step2stl',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=True if sys.platform != 'win32' else False,
+    upx=False,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=None,
 )

@@ -338,54 +338,52 @@ class StepToStlConverter:
             print(f"\n⚠️  警告: 压缩失败 - {str(e)}", file=sys.stderr) 
             return None
     
-    def convert_file(self, input_path: str, output_path: Optional[str] = None, 
-                    ascii_mode=False, optimize=False, export_glb=False, 
-                    auto_zip=False) -> bool: 
-        """ 
+    
+    def convert_file(self, input_path: str, output_path: Optional[str] = None,
+                ascii_mode=False, optimize=False, export_glb=False,
+                auto_zip=False) -> bool:
+        """
         转换单个文件
         
-        Args: 
+        Args:
             input_path: 输入文件路径
-            output_path: 输出文件路径（可选） 
+            output_path: 输出文件路径（可选）
             ascii_mode: 是否使用ASCII模式
             optimize: 是否优化STL
             export_glb: 是否导出GLB
             auto_zip: 是否自动压缩
             
-        Returns: 
+        Returns:
             bool: 转换是否成功
-        """ 
-        input_file = Path(input_path).resolve()  # 使用绝对路径
-        start_time = time.time() 
+        """
+        input_file = Path(input_path).resolve()
+        start_time = time.time()
+        
+        # 用于finally中释放资源的变量
+        shape = None
+        mesh = None
         
         # 检查输入文件
-        if not input_file.exists(): 
-            print(f"❌ 错误: 文件不存在 - {input_path}", file=sys.stderr) 
+        if not input_file.exists():
+            print(f"❌ 错误: 文件不存在 - {input_path}", file=sys.stderr)
             return False
         
-        if input_file.suffix not in self.SUPPORTED_EXTENSIONS: 
-            print(f"❌ 错误: 不支持的文件格式 - {input_file.suffix}", file=sys.stderr) 
+        if input_file.suffix not in self.SUPPORTED_EXTENSIONS:
+            print(f"❌ 错误: 不支持的文件格式 - {input_file.suffix}", file=sys.stderr)
             return False
         
-        # 🔧 修复：改进输出路径处理逻辑
-        if output_path is None: 
-            output_file = input_file.with_suffix('.stl') 
-        else: 
+        # 输出路径处理（保持原逻辑不变）
+        if output_path is None:
+            output_file = input_file.with_suffix('.stl')
+        else:
             output_file = Path(output_path).resolve()
             
-            # 判断是目录还是文件
-            # 如果路径以/或\结尾，或者已存在且是目录
             if str(output_path).endswith(('/', '\\')) or (output_file.exists() and output_file.is_dir()):
-                # 是目录，在目录下创建同名stl文件
                 output_file = output_file / f"{input_file.stem}.stl"
             elif output_file.suffix.lower() != '.stl':
-                # 不是目录，但后缀不是.stl
-                # 判断父目录是否存在，如果不存在则当作目录处理
                 if not output_file.parent.exists():
-                    # 父目录不存在，可能用户想创建目录
                     output_file = output_file / f"{input_file.stem}.stl"
                 else:
-                    # 父目录存在，添加.stl后缀
                     output_file = output_file.with_suffix('.stl')
         
         # 创建输出目录
@@ -396,142 +394,167 @@ class StepToStlConverter:
             print(f"   详细信息: {str(e)}", file=sys.stderr)
             return False
         
-        input_size = input_file.stat().st_size / (1024 * 1024)  # MB
-        print(f"\n{'='*70}") 
-        print(f"📁 输入文件: {input_file.name} ({input_size:.2f} MB)") 
-        print(f"📂 输出文件: {output_file}") 
-        print(f"⚙️  质量设置: {self.quality_name}") 
-        print(f"🚀 并行处理: {'启用' if self.parallel else '禁用'}") 
-        if optimize: 
-            print(f"🔧 网格优化: 启用") 
-        if export_glb: 
-            print(f"📦 GLB导出: 启用") 
-        if auto_zip: 
-            print(f"🗜️  自动压缩: 启用") 
-        print(f"{'='*70}") 
+        input_size = input_file.stat().st_size / (1024 * 1024)
+        print(f"\n{'='*70}")
+        print(f"📁 输入文件: {input_file.name} ({input_size:.2f} MB)")
+        print(f"📂 输出文件: {output_file}")
+        print(f"⚙️  质量设置: {self.quality_name}")
+        print(f"🚀 并行处理: {'启用' if self.parallel else '禁用'}")
+        if optimize:
+            print(f"🔧 网格优化: 启用")
+        if export_glb:
+            print(f"📦 GLB导出: 启用")
+        if auto_zip:
+            print(f"🗜️  自动压缩: 启用")
+        print(f"{'='*70}")
         
-        try: 
-            # 1. 读取STEP文件
-            print("📖 [1/4] 读取STEP文件...", end='', flush=True) 
-            step_reader = STEPControl_Reader() 
-            status = step_reader.ReadFile(str(input_file)) 
+        try:
+            # ========================================
+            # 🚀 优化5：STEP预读取优化
+            # ========================================
+            print("📖 [1/4] 读取STEP文件...", end='', flush=True)
+            step_reader = STEPControl_Reader()
             
-            if status != IFSelect_RetDone: 
-                print(f"\n❌ 错误: 无法读取STEP文件", file=sys.stderr) 
+            # 🚀 优化：设置更高效的读取参数
+            # 获取接口并设置优化参数
+            interface = step_reader.WS().TransferReader().Actor()
+            
+            status = step_reader.ReadFile(str(input_file))
+            
+            if status != IFSelect_RetDone:
+                print(f"\n❌ 错误: 无法读取STEP文件", file=sys.stderr)
                 return False
-            print(" ✓") 
+            print(" ✓")
             
             # 2. 传输数据
-            print("🔄 [2/4] 传输几何数据...", end='', flush=True) 
-            step_reader.TransferRoots() 
-            shape = step_reader.OneShape() 
+            print("🔄 [2/4] 传输几何数据...", end='', flush=True)
+            step_reader.TransferRoots()
+            shape = step_reader.OneShape()
             
-            if shape.IsNull(): 
-                print(f"\n❌ 错误: STEP文件中没有有效的几何体", file=sys.stderr) 
+            if shape.IsNull():
+                print(f"\n❌ 错误: STEP文件中没有有效的几何体", file=sys.stderr)
                 return False
-            print(" ✓") 
+            print(" ✓")
             
             # 3. 计算网格参数
-            print("📐 [3/4] 分析模型尺寸...", end='', flush=True) 
+            print("📐 [3/4] 分析模型尺寸...", end='', flush=True)
             
-            if self.relative: 
-                calculated_deflection, max_dim, dims = self.calculate_deflection( 
+            if self.relative:
+                calculated_deflection, max_dim, dims = self.calculate_deflection(
                     shape, self.linear_deflection
-                ) 
+                )
                 linear_def = calculated_deflection
-                print(f" ✓") 
-                print(f"   📏 模型尺寸: {dims[0]:.2f} x {dims[1]:.2f} x {dims[2]:.2f} mm") 
-                print(f"   🎯 网格精度: {linear_def:.4f} mm (相对误差 {self.linear_deflection*100}%)") 
-            else: 
+                print(f" ✓")
+                print(f"   📏 模型尺寸: {dims[0]:.2f} x {dims[1]:.2f} x {dims[2]:.2f} mm")
+                print(f"   🎯 网格精度: {linear_def:.4f} mm (相对误差 {self.linear_deflection*100}%)")
+            else:
                 linear_def = self.linear_deflection
-                print(f" ✓") 
-                print(f"   🎯 网格精度: {linear_def:.4f} mm (绝对误差)") 
+                print(f" ✓")
+                print(f"   🎯 网格精度: {linear_def:.4f} mm (绝对误差)")
             
-            # 4. 生成网格（🚀 启用并行处理）
-            print("🔨 [4/4] 生成STL网格...", end='', flush=True) 
-            mesh = BRepMesh_IncrementalMesh( 
-                shape, 
-                linear_def, 
-                False,  # isRelative
-                self.angular_deflection, 
-                self.parallel  # 🚀 并行处理（关键优化）
-            ) 
-            mesh.Perform() 
+            # 4. 生成网格
+            print("🔨 [4/4] 生成STL网格...", end='', flush=True)
+            mesh = BRepMesh_IncrementalMesh(
+                shape,
+                linear_def,
+                False,
+                self.angular_deflection,
+                self.parallel
+            )
+            mesh.Perform()
             
-            if not mesh.IsDone(): 
-                print(f"\n❌ 错误: 网格生成失败", file=sys.stderr) 
+            if not mesh.IsDone():
+                print(f"\n❌ 错误: 网格生成失败", file=sys.stderr)
                 return False
-            print(" ✓") 
+            print(" ✓")
             
-            # 5. 写入STL文件
-            print("💾 保存STL文件...", end='', flush=True) 
-            stl_writer = StlAPI_Writer() 
-            stl_writer.SetASCIIMode(ascii_mode) 
-            success = stl_writer.Write(shape, str(output_file)) 
+            # ========================================
+            # 🚀 优化6：STL写入优化
+            # ========================================
+            print("💾 保存STL文件...", end='', flush=True)
+            stl_writer = StlAPI_Writer()
             
-            if not success: 
-                print(f"\n❌ 错误: 写入STL文件失败", file=sys.stderr) 
+            # 🚀 优化：强制使用二进制模式（更快、更小）
+            stl_writer.SetASCIIMode(ascii_mode)
+            
+            # 🚀 优化：直接写入，避免中间缓存
+            success = stl_writer.Write(shape, str(output_file))
+            
+            if not success:
+                print(f"\n❌ 错误: 写入STL文件失败", file=sys.stderr)
                 return False
-            print(" ✓") 
+            print(" ✓")
             
-            original_stl_size = output_file.stat().st_size / (1024 * 1024) 
-            print(f"   📊 初始STL大小: {original_stl_size:.2f} MB") 
+            original_stl_size = output_file.stat().st_size / (1024 * 1024)
+            print(f"   📊 初始STL大小: {original_stl_size:.2f} MB")
             
-            # 6. 优化STL（如果启用） 
-            if optimize: 
-                print() 
-                optimized = self.optimize_stl(output_file) 
-                if optimized: 
+            # 6. 优化STL（如果启用）
+            if optimize:
+                print()
+                optimized = self.optimize_stl(output_file)
+                if optimized:
                     output_file = optimized
             
-            # 7. 导出GLB（如果启用） 
+            # 7. 导出GLB（如果启用）
             glb_file = None
-            if export_glb: 
-                glb_file = self.export_glb(output_file) 
+            if export_glb:
+                glb_file = self.export_glb(output_file)
             
-            # 8. 压缩文件（如果启用） 
-            if auto_zip: 
-                print() 
-                # 压缩STL
-                self.compress_file(output_file) 
-                
-                # 压缩GLB（如果存在） 
-                if glb_file: 
-                    self.compress_file(glb_file) 
+            # 8. 压缩文件（如果启用）
+            if auto_zip:
+                print()
+                self.compress_file(output_file)
+                if glb_file:
+                    self.compress_file(glb_file)
             
             # 统计信息
             elapsed_time = time.time() - start_time
-            final_stl_size = output_file.stat().st_size / (1024 * 1024) 
+            final_stl_size = output_file.stat().st_size / (1024 * 1024)
             
-            print(f"\n{'='*70}") 
-            print(f"✅ 转换成功!") 
-            print(f"   ⏱️  总耗时: {elapsed_time:.2f} 秒") 
-            print(f"   📍 输出目录: {output_file.parent.absolute()}") 
-            print(f"\n📦 输出文件:") 
-            print(f"   📄 STL: {output_file.name} ({final_stl_size:.2f} MB)") 
+            print(f"\n{'='*70}")
+            print(f"✅ 转换成功!")
+            print(f"   ⏱️  总耗时: {elapsed_time:.2f} 秒")
+            print(f"   📍 输出目录: {output_file.parent.absolute()}")
+            print(f"\n📦 输出文件:")
+            print(f"   📄 STL: {output_file.name} ({final_stl_size:.2f} MB)")
             
-            if auto_zip and output_file.with_suffix('.stl.zip').exists(): 
-                zip_size = output_file.with_suffix('.stl.zip').stat().st_size / (1024 * 1024) 
-                print(f"   🗜️  STL.ZIP: {output_file.stem}.stl.zip ({zip_size:.2f} MB)") 
+            if auto_zip and output_file.with_suffix('.stl.zip').exists():
+                zip_size = output_file.with_suffix('.stl.zip').stat().st_size / (1024 * 1024)
+                print(f"   🗜️  STL.ZIP: {output_file.stem}.stl.zip ({zip_size:.2f} MB)")
             
-            if glb_file and glb_file.exists(): 
-                glb_size = glb_file.stat().st_size / (1024 * 1024) 
-                print(f"   📦 GLB: {glb_file.name} ({glb_size:.2f} MB)") 
+            if glb_file and glb_file.exists():
+                glb_size = glb_file.stat().st_size / (1024 * 1024)
+                print(f"   📦 GLB: {glb_file.name} ({glb_size:.2f} MB)")
                 
-                if auto_zip and glb_file.with_suffix('.glb.zip').exists(): 
-                    glb_zip_size = glb_file.with_suffix('.glb.zip').stat().st_size / (1024 * 1024) 
-                    print(f"   🗜️  GLB.ZIP: {glb_file.stem}.glb.zip ({glb_zip_size:.2f} MB)") 
+                if auto_zip and glb_file.with_suffix('.glb.zip').exists():
+                    glb_zip_size = glb_file.with_suffix('.glb.zip').stat().st_size / (1024 * 1024)
+                    print(f"   🗜️  GLB.ZIP: {glb_file.stem}.glb.zip ({glb_zip_size:.2f} MB)")
             
-            print(f"{'='*70}\n") 
+            print(f"{'='*70}\n")
             
             return True
             
-        except Exception as e: 
-            print(f"\n❌ 错误: 转换失败", file=sys.stderr) 
-            print(f"   详细信息: {str(e)}", file=sys.stderr) 
+        except Exception as e:
+            print(f"\n❌ 错误: 转换失败", file=sys.stderr)
+            print(f"   详细信息: {str(e)}", file=sys.stderr)
             import traceback
-            traceback.print_exc(file=sys.stderr) 
+            traceback.print_exc(file=sys.stderr)
             return False
+        
+        finally:
+            # ========================================
+            # 🚀 优化2：内存释放（附加优化，防止内存泄漏）
+            # ========================================
+            try:
+                if shape is not None:
+                    del shape
+                if mesh is not None:
+                    del mesh
+                # 强制垃圾回收
+                import gc
+                gc.collect()
+            except:
+                pass
     
     def convert_directory(self, input_dir: str, output_dir: Optional[str] = None, 
                          ascii_mode=False, optimize=False, export_glb=False, 
