@@ -127,12 +127,22 @@ jobs:
         echo "Starting PyInstaller Build"
         echo "============================================================"
         
+        echo "CONDA_PREFIX: $CONDA_PREFIX"
+        echo ""
+        
+        echo "Checking OpenCASCADE libraries..."
+        if [ -d "$CONDA_PREFIX/Library/bin" ]; then
+          echo "Windows DLLs:"
+          ls -lh "$CONDA_PREFIX/Library/bin" | grep -i "TK" | head -n 10 || echo "No TK DLLs found"
+        fi
+        
+        echo ""
         echo "Cleaning previous builds..."
         rm -rf build dist
         
         echo ""
-        echo "Running PyInstaller..."
-        pyinstaller step2stl.spec 2>&1 | tee build.log
+        echo "Running PyInstaller with custom hooks..."
+        pyinstaller --log-level=INFO step2stl.spec 2>&1 | tee build.log
         
         echo ""
         echo "============================================================"
@@ -143,16 +153,20 @@ jobs:
         ls -lh dist/
         
         if [ -f "dist/step2stl.exe" ]; then
+          FILE_SIZE=$(stat -c%s "dist/step2stl.exe" 2>/dev/null || stat -f%z "dist/step2stl.exe")
+          FILE_SIZE_MB=$((FILE_SIZE / 1024 / 1024))
           echo ""
           echo "SUCCESS: step2stl.exe created"
-          FILE_SIZE=$(du -h dist/step2stl.exe | cut -f1)
-          echo "File size: $FILE_SIZE"
+          echo "File size: ${FILE_SIZE_MB}MB"
+          
+          # 检查文件大小是否合理
+          if [ $FILE_SIZE_MB -lt 100 ]; then
+            echo "WARNING: File size seems too small (< 100MB)"
+            echo "OpenCASCADE libraries may not be included!"
+          fi
         else
           echo ""
           echo "ERROR: step2stl.exe not found!"
-          echo ""
-          echo "Build log (last 50 lines):"
-          tail -n 50 build.log
           exit 1
         fi
     
