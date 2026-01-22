@@ -1,8 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
 step2stl PyInstaller 打包配置
-修复 Windows 平台 numpy 1.26.4 和 jaraco 打包问题
-支持 Windows/macOS 跨平台构建
+修复 Windows/macOS 跨平台兼容性问题
 """
 
 from PyInstaller.utils.hooks import (
@@ -15,7 +14,7 @@ import sys
 import os
 
 print("=" * 60)
-print("🚀 step2stl PyInstaller Build Configuration")
+print("step2stl PyInstaller Build Configuration")
 print("=" * 60)
 
 # ==========================================
@@ -26,19 +25,45 @@ datas = []
 binaries = []
 
 # ==========================================
-# 🔧 关键修复 1：完整收集 numpy
+# 辅助函数：安全过滤字符串列表
 # ==========================================
-print("\n📦 Collecting numpy (complete)...")
+def safe_filter_strings(items):
+    """确保返回的列表只包含有效字符串"""
+    if not items:
+        return []
+    return [str(item) for item in items if item and isinstance(item, str)]
+
+def safe_filter_tuples(items):
+    """确保返回的列表只包含有效元组"""
+    if not items:
+        return []
+    filtered = []
+    for item in items:
+        if isinstance(item, tuple) and len(item) >= 2:
+            # 确保元组中的字符串有效
+            if all(isinstance(x, str) or x is None for x in item):
+                filtered.append(item)
+    return filtered
+
+# ==========================================
+# 收集 numpy
+# ==========================================
+print("\nCollecting numpy (complete)...")
 try:
     numpy_result = collect_all('numpy')
-    hiddenimports += numpy_result[0]
-    binaries += numpy_result[1]
-    datas += numpy_result[2]
-    print(f"  ✓ Hidden imports: {len(numpy_result[0])} modules")
-    print(f"  ✓ Binaries: {len(numpy_result[1])} files")
-    print(f"  ✓ Data files: {len(numpy_result[2])} files")
+    numpy_hidden = safe_filter_strings(numpy_result[0])
+    numpy_bins = safe_filter_tuples(numpy_result[1])
+    numpy_datas = safe_filter_tuples(numpy_result[2])
+    
+    hiddenimports += numpy_hidden
+    binaries += numpy_bins
+    datas += numpy_datas
+    
+    print(f"  Hidden imports: {len(numpy_hidden)} modules")
+    print(f"  Binaries: {len(numpy_bins)} files")
+    print(f"  Data files: {len(numpy_datas)} files")
 except Exception as e:
-    print(f"  ⚠ Warning: {e}")
+    print(f"  Warning: {e}")
     # 备用方案：手动添加关键模块
     hiddenimports += [
         'numpy',
@@ -53,19 +78,24 @@ except Exception as e:
     ]
 
 # ==========================================
-# 🔧 关键修复 2：完整收集 jaraco
+# 收集 jaraco
 # ==========================================
-print("\n📦 Collecting jaraco (complete)...")
+print("\nCollecting jaraco (complete)...")
 try:
     jaraco_result = collect_all('jaraco')
-    hiddenimports += jaraco_result[0]
-    binaries += jaraco_result[1]
-    datas += jaraco_result[2]
-    print(f"  ✓ Hidden imports: {len(jaraco_result[0])} modules")
-    print(f"  ✓ Data files: {len(jaraco_result[2])} files")
+    jaraco_hidden = safe_filter_strings(jaraco_result[0])
+    jaraco_bins = safe_filter_tuples(jaraco_result[1])
+    jaraco_datas = safe_filter_tuples(jaraco_result[2])
+    
+    hiddenimports += jaraco_hidden
+    binaries += jaraco_bins
+    datas += jaraco_datas
+    
+    print(f"  Hidden imports: {len(jaraco_hidden)} modules")
+    print(f"  Data files: {len(jaraco_datas)} files")
 except Exception as e:
-    print(f"  ⚠ Warning: {e}")
-    # 备用方案：手动添加核心模块
+    print(f"  Warning: {e}")
+    # 备用方案
     hiddenimports += [
         'jaraco',
         'jaraco.text',
@@ -75,9 +105,9 @@ except Exception as e:
     ]
 
 # ==========================================
-# 🔧 关键修复 3：标准库模块（解决 ipaddress 错误）
+# 标准库模块
 # ==========================================
-print("\n📦 Adding standard library modules...")
+print("\nAdding standard library modules...")
 standard_modules = [
     'ipaddress',
     'urllib',
@@ -104,12 +134,12 @@ standard_modules = [
     'io',
 ]
 hiddenimports += standard_modules
-print(f"  ✓ Added {len(standard_modules)} standard library modules")
+print(f"  Added {len(standard_modules)} standard library modules")
 
 # ==========================================
-# 收集 OCC (pythonocc-core) 模块
+# 收集 OCC 模块
 # ==========================================
-print("\n📦 Collecting OCC modules...")
+print("\nCollecting OCC modules...")
 occ_modules = [
     'OCC',
     'OCC.Core',
@@ -130,48 +160,66 @@ occ_modules = [
     'OCC.Core.XSControl',
 ]
 hiddenimports += occ_modules
-print(f"  ✓ Added {len(occ_modules)} OCC modules")
+print(f"  Added {len(occ_modules)} OCC modules")
 
 # 收集 OCC 数据文件和动态库
 try:
     occ_datas = collect_data_files('OCC', include_py_files=True)
+    occ_datas = safe_filter_tuples(occ_datas)
     datas += occ_datas
-    print(f"  ✓ Collected {len(occ_datas)} OCC data files")
+    print(f"  Collected {len(occ_datas)} OCC data files")
 except Exception as e:
-    print(f"  ⚠ Warning: Failed to collect OCC data files: {e}")
+    print(f"  Warning: Failed to collect OCC data files: {e}")
 
 try:
     occ_binaries = collect_dynamic_libs('OCC')
+    occ_binaries = safe_filter_tuples(occ_binaries)
     binaries += occ_binaries
-    print(f"  ✓ Collected {len(occ_binaries)} OCC binaries")
+    print(f"  Collected {len(occ_binaries)} OCC binaries")
 except Exception as e:
-    print(f"  ⚠ Warning: Failed to collect OCC binaries: {e}")
+    print(f"  Warning: Failed to collect OCC binaries: {e}")
 
 # ==========================================
 # 收集 trimesh 模块
 # ==========================================
-print("\n📦 Collecting trimesh modules...")
+print("\nCollecting trimesh modules...")
 try:
     trimesh_modules = collect_submodules('trimesh')
+    trimesh_modules = safe_filter_strings(trimesh_modules)
     hiddenimports += trimesh_modules
-    print(f"  ✓ Collected {len(trimesh_modules)} trimesh modules")
+    print(f"  Collected {len(trimesh_modules)} trimesh modules")
 except Exception as e:
-    print(f"  ⚠ Warning: {e}")
+    print(f"  Warning: {e}")
     hiddenimports += ['trimesh']
 
 # 收集 trimesh 数据文件
 try:
     trimesh_datas = collect_data_files('trimesh')
+    trimesh_datas = safe_filter_tuples(trimesh_datas)
     datas += trimesh_datas
-    print(f"  ✓ Collected {len(trimesh_datas)} trimesh data files")
+    print(f"  Collected {len(trimesh_datas)} trimesh data files")
 except Exception as e:
-    print(f"  ⚠ Warning: Failed to collect trimesh data: {e}")
+    print(f"  Warning: Failed to collect trimesh data: {e}")
 
 # ==========================================
-# 排除不需要的模块（减小体积）
+# 最终过滤：确保所有列表有效
+# ==========================================
+print("\nFinal validation...")
+hiddenimports = safe_filter_strings(hiddenimports)
+binaries = safe_filter_tuples(binaries)
+datas = safe_filter_tuples(datas)
+
+# 去重
+hiddenimports = list(set(hiddenimports))
+
+print(f"  Total hidden imports: {len(hiddenimports)}")
+print(f"  Total binaries: {len(binaries)}")
+print(f"  Total data files: {len(datas)}")
+
+# ==========================================
+# 排除不需要的模块
 # ==========================================
 excludes = [
-    # GUI 框架
     'tkinter',
     '_tkinter',
     'PyQt5',
@@ -179,30 +227,24 @@ excludes = [
     'PySide2',
     'PySide6',
     'wx',
-    
-    # 科学计算（项目不需要的）
     'matplotlib',
     'pandas',
     'scipy',
     'sklearn',
     'tensorflow',
     'torch',
-    
-    # 开发工具
     'pytest',
     'IPython',
     'jupyter',
     'notebook',
-    
-    # 文档生成
     'sphinx',
     'docutils',
 ]
 
-print(f"\n🚫 Excluding {len(excludes)} unnecessary modules")
+print(f"\nExcluding {len(excludes)} unnecessary modules")
 
 # ==========================================
-# 过滤二进制文件（减小体积）
+# 过滤二进制文件
 # ==========================================
 def filter_binaries(binaries_list):
     """过滤测试和示例相关的二进制文件"""
@@ -211,20 +253,18 @@ def filter_binaries(binaries_list):
         'test', 'tests', 'testing',
         'example', 'examples',
         'doc', 'docs',
-        '.pdb',  # Windows 调试符号
-        'tcl', 'tk',  # Tkinter 相关
+        '.pdb',
+        'tcl', 'tk',
     ]
     
     for item in binaries_list:
         if isinstance(item, tuple) and len(item) >= 2:
             name = item[0]
-            name_lower = name.lower() if isinstance(name, str) else ''
-            
-            # 检查是否包含排除模式
-            should_exclude = any(pattern in name_lower for pattern in exclude_patterns)
-            
-            if not should_exclude:
-                filtered.append(item)
+            if isinstance(name, str):
+                name_lower = name.lower()
+                should_exclude = any(pattern in name_lower for pattern in exclude_patterns)
+                if not should_exclude:
+                    filtered.append(item)
         else:
             filtered.append(item)
     
@@ -234,58 +274,56 @@ def filter_binaries(binaries_list):
 # Analysis 配置
 # ==========================================
 print("\n" + "=" * 60)
-print("🔨 Creating Analysis object...")
+print("Creating Analysis object...")
 print("=" * 60)
 
 a = Analysis(
-    ['step2stl.py'],                    # 主脚本
-    pathex=[],                          # 额外搜索路径
-    binaries=binaries,                  # 二进制文件
-    datas=datas,                        # 数据文件
-    hiddenimports=hiddenimports,        # 隐藏导入
-    hookspath=[],                       # 自定义 hook 路径
-    hooksconfig={},                     # Hook 配置
-    runtime_hooks=[],                   # 🔧 清空 runtime hooks
-    excludes=excludes,                  # 排除的模块
-    noarchive=False,                    # 是否不创建归档
-    win_no_prefer_redirects=False,     # Windows 特定
-    win_private_assemblies=False,      # Windows 特定
+    ['step2stl.py'],
+    pathex=[],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=excludes,
+    noarchive=False,
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
 )
 
-print(f"  ✓ Total hidden imports: {len(hiddenimports)}")
-print(f"  ✓ Total data files: {len(datas)}")
-print(f"  ✓ Total binaries (before filter): {len(binaries)}")
+print(f"Analysis created successfully")
 
 # ==========================================
-# 🔧 关键修复 4：移除 pkg_resources runtime hook
+# 移除 pkg_resources runtime hook
 # ==========================================
-print("\n🔧 Removing problematic runtime hooks...")
+print("\nRemoving problematic runtime hooks...")
 original_scripts = len(a.scripts)
 a.scripts = [s for s in a.scripts if 'pyi_rth_pkgres' not in s[1]]
 removed_scripts = original_scripts - len(a.scripts)
-print(f"  ✓ Removed {removed_scripts} problematic runtime hook(s)")
+print(f"  Removed {removed_scripts} problematic runtime hook(s)")
 
 # ==========================================
 # 过滤二进制文件
 # ==========================================
-print("\n🔧 Filtering binaries...")
+print("\nFiltering binaries...")
 original_binaries = len(a.binaries)
 a.binaries = filter_binaries(a.binaries)
 removed_binaries = original_binaries - len(a.binaries)
-print(f"  ✓ Removed {removed_binaries} unnecessary binaries")
-print(f"  ✓ Final binaries count: {len(a.binaries)}")
+print(f"  Removed {removed_binaries} unnecessary binaries")
+print(f"  Final binaries count: {len(a.binaries)}")
 
 # ==========================================
-# PYZ 配置（Python 字节码归档）
+# PYZ 配置
 # ==========================================
-print("\n📦 Creating PYZ archive...")
+print("\nCreating PYZ archive...")
 pyz = PYZ(a.pure)
-print("  ✓ PYZ archive created")
+print("  PYZ archive created")
 
 # ==========================================
-# EXE 配置（最终可执行文件）
+# EXE 配置
 # ==========================================
-print("\n🎯 Creating EXE configuration...")
+print("\nCreating EXE configuration...")
 
 exe = EXE(
     pyz,
@@ -293,27 +331,27 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='step2stl',                           # 输出文件名
-    debug=False,                               # 调试模式（生产环境关闭）
+    name='step2stl',
+    debug=False,
     bootloader_ignore_signals=False,
-    strip=False,                               # 不剥离符号（保持兼容性）
-    upx=False,                                 # 🔧 关闭 UPX 压缩（避免问题）
+    strip=False,
+    upx=False,
     upx_exclude=[],
-    runtime_tmpdir=None,                       # 运行时临时目录
-    console=True,                              # 显示控制台窗口
+    runtime_tmpdir=None,
+    console=True,
     disable_windowed_traceback=False,
-    argv_emulation=False,                      # macOS 参数模拟
-    target_arch=None,                          # 目标架构（自动检测）
-    codesign_identity=None,                    # macOS 代码签名
-    entitlements_file=None,                    # macOS 权限文件
-    icon=None,                                 # 图标文件（可选）
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=None,
 )
 
-print("  ✓ EXE configuration created")
+print("  EXE configuration created")
 print("\n" + "=" * 60)
-print("✅ Build configuration completed!")
+print("Build configuration completed!")
 print("=" * 60)
-print("\n💡 Tips:")
+print("\nTips:")
 print("  - Run: pyinstaller step2stl.spec")
 print("  - Output: dist/step2stl.exe (Windows) or dist/step2stl (macOS)")
 print("  - Test: dist/step2stl --help")
