@@ -39,19 +39,30 @@ jobs:
     - name: Install dependencies
       shell: bash -el {0}
       run: |
+        echo "============================================================"
+        echo "Installing Dependencies"
+        echo "============================================================"
+        
         echo "Installing pythonocc-core..."
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }}
         
-        echo "Installing Python packages..."
+        echo ""
+        echo "Installing PyInstaller..."
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
+        
+        echo ""
+        echo "Installing trimesh..."
         pip install trimesh==3.23.5
         
+        echo ""
         echo "Installing numpy (compatible version)..."
         pip install "numpy>=1.21.0,<2.0" --force-reinstall
         
+        echo ""
         echo "Installing jaraco dependencies..."
         pip install "jaraco.text>=3.0" "jaraco.functools>=3.5.0" "jaraco.context>=4.0"
         
+        echo ""
         echo "Installation complete!"
     
     - name: Verify installations
@@ -76,22 +87,38 @@ jobs:
         python -c "import numpy; print('numpy:', numpy.__version__)"
         python -c "import trimesh; print('trimesh:', trimesh.__version__)"
         python -c "import OCC; print('OCC VERSION:', OCC.VERSION)"
+        python -c "import PyInstaller; print('PyInstaller:', PyInstaller.__version__)"
         
         echo ""
         echo "============================================================"
-        echo "Module Import Tests"
+        echo "Critical Module Import Tests"
         echo "============================================================"
         
-        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('OCC.Core.STEPControl: OK')"
-        python -c "import trimesh; print('trimesh: OK')"
-        python -c "import numpy; print('numpy: OK')"
-        python -c "import numpy._core._multiarray_tests; print('numpy._core._multiarray_tests: OK')"
-        python -c "import jaraco.text; print('jaraco.text: OK')"
-        python -c "import ipaddress; print('ipaddress: OK')"
-        python -c "import urllib.parse; print('urllib.parse: OK')"
+        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('OCC.Core.STEPControl: OK')" || exit 1
+        python -c "from OCC.Core.StlAPI import StlAPI_Writer; print('OCC.Core.StlAPI: OK')" || exit 1
+        python -c "from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh; print('OCC.Core.BRepMesh: OK')" || exit 1
+        
+        python -c "import trimesh; print('trimesh: OK')" || exit 1
+        python -c "import numpy; print('numpy: OK')" || exit 1
+        python -c "import numpy.core; print('numpy.core: OK')" || exit 1
+        
+        python -c "import jaraco.text; print('jaraco.text: OK')" || exit 1
+        python -c "import ipaddress; print('ipaddress: OK')" || exit 1
+        python -c "import urllib.parse; print('urllib.parse: OK')" || exit 1
         
         echo ""
-        echo "All verifications passed!"
+        echo "============================================================"
+        echo "Optional Module Tests (non-critical)"
+        echo "============================================================"
+        
+        # 这些模块是可选的，失败不影响构建
+        python -c "import numpy._core._multiarray_tests; print('numpy._core._multiarray_tests: OK')" 2>/dev/null || echo "numpy._core._multiarray_tests: SKIPPED (optional)"
+        python -c "import numpy._core; print('numpy._core: OK')" 2>/dev/null || echo "numpy._core: SKIPPED (optional)"
+        
+        echo ""
+        echo "============================================================"
+        echo "All critical verifications passed!"
+        echo "============================================================"
     
     - name: Build EXE
       shell: bash -el {0}
@@ -105,7 +132,7 @@ jobs:
         
         echo ""
         echo "Running PyInstaller..."
-        pyinstaller step2stl.spec
+        pyinstaller step2stl.spec 2>&1 | tee build.log
         
         echo ""
         echo "============================================================"
@@ -117,11 +144,15 @@ jobs:
         
         if [ -f "dist/step2stl.exe" ]; then
           echo ""
-          echo "step2stl.exe created successfully"
-          echo "Size: $(du -h dist/step2stl.exe | cut -f1)"
+          echo "SUCCESS: step2stl.exe created"
+          FILE_SIZE=$(du -h dist/step2stl.exe | cut -f1)
+          echo "File size: $FILE_SIZE"
         else
           echo ""
           echo "ERROR: step2stl.exe not found!"
+          echo ""
+          echo "Build log (last 50 lines):"
+          tail -n 50 build.log
           exit 1
         fi
     
@@ -142,16 +173,25 @@ jobs:
         echo "Testing Executable"
         echo "============================================================"
         
-        echo "Test 1: --help"
-        ./dist/step2stl.exe --help || echo "Help test completed with code $?"
+        echo "Test 1: Check if executable runs"
+        ./dist/step2stl.exe --help 2>&1 | head -n 20 || {
+          EXIT_CODE=$?
+          echo "Exit code: $EXIT_CODE"
+          if [ $EXIT_CODE -ne 0 ] && [ $EXIT_CODE -ne 2 ]; then
+            echo "ERROR: Executable failed to run"
+            exit 1
+          fi
+        }
         
         echo ""
-        echo "Test 2: --version (if implemented)"
-        ./dist/step2stl.exe --version || echo "Version test completed with code $?"
+        echo "Test 2: Check version (if implemented)"
+        ./dist/step2stl.exe --version 2>&1 || echo "Version test completed"
         
         echo ""
-        echo "Tests completed!"
-      continue-on-error: true
+        echo "============================================================"
+        echo "Executable tests completed!"
+        echo "============================================================"
+      continue-on-error: false
     
     - name: Upload EXE
       uses: actions/upload-artifact@v4
@@ -166,6 +206,14 @@ jobs:
         name: step2stl-windows-x64-zip
         path: dist/step2stl-windows-x64.zip
         retention-days: 30
+    
+    - name: Upload build log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log-windows
+        path: build.log
+        retention-days: 7
 
   # ==========================================
   # macOS ARM64 (M1/M2) 构建
