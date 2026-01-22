@@ -14,7 +14,7 @@ env:
   PYTHON_MAC: "3.10"
   OCC_VERSION_WIN: "7.8.1"
   OCC_VERSION_MAC: "7.8.1"
-  PYINSTALLER_VERSION: "5.10.1"
+  PYINSTALLER_VERSION: "6.0.0"
 
 jobs:
   # ==========================================
@@ -58,6 +58,7 @@ jobs:
         python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('OCC import OK')"
         python -c "import trimesh; print('trimesh import OK')"
         python -c "import numpy; print('numpy import OK')"
+        python -c "import ipaddress; print('ipaddress import OK')"  # ← 新增检查
         
         echo "OCC version:"
         python -c "import OCC; print('OCC VERSION:', OCC.VERSION)"
