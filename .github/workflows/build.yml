@@ -15,7 +15,6 @@ env:
   OCC_VERSION_WIN: "7.8.1"
   OCC_VERSION_MAC: "7.8.1"
   PYINSTALLER_VERSION: "6.9.0"
-  NUMPY_VERSION: "1.26.4"
 
 jobs:
   # ==========================================
@@ -40,56 +39,110 @@ jobs:
     - name: Install dependencies
       shell: bash -el {0}
       run: |
-        echo "Installing pythonocc-core..."
+        echo "🔧 Installing pythonocc-core..."
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }}
         
-        echo "Installing Python packages..."
+        echo "🔧 Installing Python packages..."
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh==3.23.5
-        pip install numpy==${{ env.NUMPY_VERSION }}
-        python -c "import numpy; print('numpy version:', numpy.__version__)"
-        python -c "import numpy._core._multiarray_tests; print('numpy._core._multiarray_tests OK')"
-
-
+        
+        # 🔧 关键：安装兼容版本的 numpy
+        echo "🔧 Installing numpy (compatible version)..."
+        pip install "numpy>=1.21.0,<2.0" --force-reinstall
+        
+        # 🔧 关键：安装 jaraco 依赖
+        echo "🔧 Installing jaraco dependencies..."
+        pip install "jaraco.text>=3.0" "jaraco.functools>=3.5.0" "jaraco.context>=4.0"
+        
+        echo "✅ Installation complete!"
     
-    # 🔧 修复：Windows 编码问题
     - name: Verify installations
       shell: bash -el {0}
       run: |
+        echo "=" | tr '=' '-' | head -c 60 && echo
+        echo "System Information"
+        echo "=" | tr '=' '-' | head -c 60 && echo
+        
         echo "Python version:"
         python --version
         
-        echo "Checking imports..."
-        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('OCC import OK')"
-        python -c "import trimesh; print('trimesh import OK')"
-        python -c "import numpy; print('numpy import OK')"
-        python -c "import ipaddress; print('ipaddress import OK')"  # ← 新增检查
+        echo -e "\nPython location:"
+        which python
         
-        echo "OCC version:"
-        python -c "import OCC; print('OCC VERSION:', OCC.VERSION)"
+        echo -e "\n=" | tr '=' '-' | head -c 60 && echo
+        echo "Package Versions"
+        echo "=" | tr '=' '-' | head -c 60 && echo
+        
+        python -c "import numpy; print(f'numpy: {numpy.__version__}')"
+        python -c "import trimesh; print(f'trimesh: {trimesh.__version__}')"
+        python -c "import OCC; print(f'OCC VERSION: {OCC.VERSION}')"
+        
+        echo -e "\n=" | tr '=' '-' | head -c 60 && echo
+        echo "Module Import Tests"
+        echo "=" | tr '=' '-' | head -c 60 && echo
+        
+        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('✓ OCC.Core.STEPControl')"
+        python -c "import trimesh; print('✓ trimesh')"
+        python -c "import numpy; print('✓ numpy')"
+        python -c "import numpy._core._multiarray_tests; print('✓ numpy._core._multiarray_tests')"
+        python -c "import jaraco.text; print('✓ jaraco.text')"
+        python -c "import ipaddress; print('✓ ipaddress')"
+        python -c "import urllib.parse; print('✓ urllib.parse')"
+        
+        echo -e "\n✅ All verifications passed!"
     
     - name: Build EXE
       shell: bash -el {0}
       run: |
-        echo "Starting PyInstaller build..."
+        echo "=" | tr '=' '-' | head -c 60 && echo
+        echo "🚀 Starting PyInstaller Build"
+        echo "=" | tr '=' '-' | head -c 60 && echo
+        
+        echo "Cleaning previous builds..."
+        rm -rf build dist
+        
+        echo -e "\nRunning PyInstaller..."
         pyinstaller step2stl.spec
         
-        echo "Build complete!"
+        echo -e "\n=" | tr '=' '-' | head -c 60 && echo
+        echo "✅ Build Complete!"
+        echo "=" | tr '=' '-' | head -c 60 && echo
+        
+        echo "Output files:"
         ls -lh dist/
+        
+        if [ -f "dist/step2stl.exe" ]; then
+          echo -e "\n✅ step2stl.exe created successfully"
+          echo "Size: $(du -h dist/step2stl.exe | cut -f1)"
+        else
+          echo -e "\n❌ ERROR: step2stl.exe not found!"
+          exit 1
+        fi
     
     - name: Create ZIP package
       shell: bash -el {0}
       run: |
         cd dist
-        ls -lh step2stl.exe
+        echo "Creating ZIP archive..."
         7z a -tzip step2stl-windows-x64.zip step2stl.exe
+        
+        echo "Archive created:"
         ls -lh step2stl-windows-x64.zip
     
     - name: Test executable
       shell: bash -el {0}
       run: |
-        echo "Testing --help..."
-        ./dist/step2stl.exe --help || echo "Help test completed"
+        echo "=" | tr '=' '-' | head -c 60 && echo
+        echo "🧪 Testing Executable"
+        echo "=" | tr '=' '-' | head -c 60 && echo
+        
+        echo "Test 1: --help"
+        ./dist/step2stl.exe --help || echo "Help test completed with code $?"
+        
+        echo -e "\nTest 2: --version (if implemented)"
+        ./dist/step2stl.exe --version || echo "Version test completed with code $?"
+        
+        echo -e "\n✅ Tests completed!"
       continue-on-error: true
     
     - name: Upload EXE
@@ -128,13 +181,14 @@ jobs:
     - name: Install dependencies
       shell: bash -el {0}
       run: |
-        echo "Installing pythonocc-core..."
+        echo "🔧 Installing pythonocc-core..."
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
         
-        echo "Installing Python packages..."
+        echo "🔧 Installing Python packages..."
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
-        pip install trimesh
-        pip install numpy
+        pip install trimesh numpy
+        
+        echo "✅ Installation complete!"
     
     - name: Verify installations
       shell: bash -el {0}
@@ -143,27 +197,27 @@ jobs:
         uname -m
         sw_vers
         
-        echo "Python version:"
+        echo -e "\nPython version:"
         python --version
         
-        echo "Checking imports..."
-        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('OCC import OK')"
-        python -c "import trimesh; print('trimesh import OK')"
-        python -c "import numpy; print('numpy import OK')"
+        echo -e "\nChecking imports..."
+        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('✓ OCC import OK')"
+        python -c "import trimesh; print('✓ trimesh import OK')"
+        python -c "import numpy; print('✓ numpy import OK')"
         
-        echo "OCC version:"
+        echo -e "\nOCC version:"
         python -c "import OCC; print('OCC VERSION:', OCC.VERSION)"
     
     - name: Build Binary
       shell: bash -el {0}
       run: |
-        echo "Starting PyInstaller build..."
+        echo "🚀 Starting PyInstaller build..."
         pyinstaller step2stl.spec
         
-        echo "Build complete!"
+        echo -e "\n✅ Build complete!"
         ls -lh dist/
         
-        echo "Binary architecture:"
+        echo -e "\nBinary architecture:"
         file dist/step2stl
     
     - name: Create ZIP package
@@ -177,7 +231,7 @@ jobs:
     - name: Test executable
       shell: bash -el {0}
       run: |
-        echo "Testing --help..."
+        echo "🧪 Testing executable..."
         chmod +x dist/step2stl
         ./dist/step2stl --help || echo "Help test completed"
       continue-on-error: true
