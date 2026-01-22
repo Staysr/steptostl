@@ -14,6 +14,7 @@ env:
   PYTHON_MAC: "3.10"
   OCC_VERSION_WIN: "7.8.1"
   OCC_VERSION_MAC: "7.8.1"
+  PYINSTALLER_VERSION: "5.10.1"
 
 jobs:
   # ==========================================
@@ -42,7 +43,7 @@ jobs:
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }}
         
         echo "Installing Python packages..."
-        pip install pyinstaller==6.3.0
+        pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh==3.23.5
         pip install numpy
     
@@ -125,7 +126,7 @@ jobs:
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
         
         echo "Installing Python packages..."
-        pip install pyinstaller
+        pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh
         pip install numpy
     
@@ -212,7 +213,8 @@ jobs:
       shell: bash -el {0}
       run: |
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
-        pip install pyinstaller trimesh numpy
+        pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
+        pip install trimesh numpy
     
     - name: Verify installations
       shell: bash -el {0}
