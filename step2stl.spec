@@ -1,40 +1,42 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
 step2stl PyInstaller 打包配置
-使用自定义 hook 收集 pythonocc-core
+增强版 - 强制包含所有 OCC 依赖
 """
 
-from PyInstaller.utils.hooks import (
-    collect_submodules,
-    collect_data_files,
-    collect_dynamic_libs,
-    collect_all,
-)
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 import sys
 import os
 
-print("=" * 60)
+print("=" * 70)
 print("step2stl PyInstaller Build Configuration")
-print("=" * 60)
+print("=" * 70)
 
 # ==========================================
-# 初始化收集列表
+# 环境检查
 # ==========================================
-hiddenimports = []
-datas = []
-binaries = []
+print("\n[Environment Check]")
+print(f"Python: {sys.version}")
+print(f"Platform: {sys.platform}")
+print(f"Python executable: {sys.executable}")
+
+conda_prefix = os.environ.get('CONDA_PREFIX', '')
+if conda_prefix:
+    print(f"Conda prefix: {conda_prefix}")
+else:
+    print("WARNING: CONDA_PREFIX not set!")
+
+print()
 
 # ==========================================
-# 辅助函数：安全过滤
+# 辅助函数
 # ==========================================
 def safe_filter_strings(items):
-    """确保返回的列表只包含有效字符串"""
     if not items:
         return []
     return [str(item) for item in items if item and isinstance(item, str)]
 
 def safe_filter_tuples(items):
-    """确保返回的列表只包含有效元组"""
     if not items:
         return []
     filtered = []
@@ -45,131 +47,104 @@ def safe_filter_tuples(items):
     return filtered
 
 # ==========================================
+# 初始化
+# ==========================================
+hiddenimports = []
+datas = []
+binaries = []
+
+# ==========================================
 # 收集 numpy
 # ==========================================
-print("\nCollecting numpy (complete)...")
+print("[Collecting numpy]")
 try:
     numpy_result = collect_all('numpy')
-    numpy_hidden = safe_filter_strings(numpy_result[0])
-    numpy_bins = safe_filter_tuples(numpy_result[1])
-    numpy_datas = safe_filter_tuples(numpy_result[2])
-    
-    hiddenimports += numpy_hidden
-    binaries += numpy_bins
-    datas += numpy_datas
-    
-    print(f"  Hidden imports: {len(numpy_hidden)} modules")
-    print(f"  Binaries: {len(numpy_bins)} files")
-    print(f"  Data files: {len(numpy_datas)} files")
+    hiddenimports += safe_filter_strings(numpy_result[0])
+    binaries += safe_filter_tuples(numpy_result[1])
+    datas += safe_filter_tuples(numpy_result[2])
+    print(f"  ✓ Collected numpy")
 except Exception as e:
-    print(f"  Warning: {e}")
-    hiddenimports += [
-        'numpy',
-        'numpy.core',
-        'numpy._core',
-        'numpy._core._multiarray_umath',
-        'numpy.core._multiarray_umath',
-    ]
+    print(f"  ⚠ {e}")
+    hiddenimports += ['numpy', 'numpy.core', 'numpy._core']
 
 # ==========================================
 # 收集 jaraco
 # ==========================================
-print("\nCollecting jaraco (complete)...")
+print("\n[Collecting jaraco]")
 try:
     jaraco_result = collect_all('jaraco')
-    jaraco_hidden = safe_filter_strings(jaraco_result[0])
-    jaraco_datas = safe_filter_tuples(jaraco_result[2])
-    
-    hiddenimports += jaraco_hidden
-    datas += jaraco_datas
-    
-    print(f"  Hidden imports: {len(jaraco_hidden)} modules")
+    hiddenimports += safe_filter_strings(jaraco_result[0])
+    datas += safe_filter_tuples(jaraco_result[2])
+    print(f"  ✓ Collected jaraco")
 except Exception as e:
-    print(f"  Warning: {e}")
-    hiddenimports += ['jaraco', 'jaraco.text', 'jaraco.functools', 'jaraco.context']
+    print(f"  ⚠ {e}")
+    hiddenimports += ['jaraco', 'jaraco.text', 'jaraco.functools']
 
 # ==========================================
-# 标准库模块
+# 标准库
 # ==========================================
-print("\nAdding standard library modules...")
-standard_modules = [
-    'ipaddress',
-    'urllib', 'urllib.parse', 'urllib.request', 'urllib.error',
-    'email', 'email.mime', 'email.mime.text',
-    'pathlib', 'zipfile', 'argparse',
-    'collections', 'collections.abc',
-    'warnings', 'traceback', 'gc', 'time', 'os', 'sys', 're', 'json', 'base64', 'io',
+print("\n[Adding standard library modules]")
+hiddenimports += [
+    'ipaddress', 'urllib', 'urllib.parse', 'pathlib', 'argparse',
+    'collections', 'collections.abc', 'warnings', 'traceback',
 ]
-hiddenimports += standard_modules
-print(f"  Added {len(standard_modules)} modules")
+print(f"  ✓ Added standard modules")
 
 # ==========================================
-# 收集 OCC - 基础模块
+# 收集 OCC (会使用自定义 hook)
 # ==========================================
-print("\nCollecting OCC base modules...")
-occ_core_modules = [
+print("\n[Collecting OCC modules]")
+occ_modules = [
     'OCC', 'OCC.Core',
     'OCC.Core.STEPControl', 'OCC.Core.StlAPI', 'OCC.Core.BRepMesh',
     'OCC.Core.IFSelect', 'OCC.Core.Bnd', 'OCC.Core.BRepBndLib',
-    'OCC.Core.TopoDS', 'OCC.Core.TopAbs', 'OCC.Core.gp',
-    'OCC.Core.TopExp', 'OCC.Core.TopTools', 'OCC.Core.BRep',
-    'OCC.Core.GeomAbs', 'OCC.Core.Interface', 'OCC.Core.XSControl',
 ]
-hiddenimports += occ_core_modules
+hiddenimports += occ_modules
 
-# 收集所有 OCC.Core 子模块
 try:
-    occ_all_modules = collect_submodules('OCC.Core')
-    occ_all_modules = safe_filter_strings(occ_all_modules)
-    hiddenimports += occ_all_modules
-    print(f"  Collected {len(occ_all_modules)} OCC.Core modules")
+    occ_all = collect_submodules('OCC.Core')
+    hiddenimports += safe_filter_strings(occ_all)
+    print(f"  ✓ Collected {len(occ_all)} OCC.Core modules")
 except:
     pass
 
 # ==========================================
 # 收集 trimesh
 # ==========================================
-print("\nCollecting trimesh...")
+print("\n[Collecting trimesh]")
 try:
     trimesh_modules = collect_submodules('trimesh')
-    trimesh_modules = safe_filter_strings(trimesh_modules)
-    hiddenimports += trimesh_modules
-    print(f"  Collected {len(trimesh_modules)} modules")
-except Exception as e:
-    print(f"  Warning: {e}")
+    hiddenimports += safe_filter_strings(trimesh_modules)
+    print(f"  ✓ Collected trimesh")
+except:
     hiddenimports += ['trimesh']
 
 # ==========================================
-# 最终过滤和去重
+# 去重和验证
 # ==========================================
-print("\nFinal validation...")
-hiddenimports = safe_filter_strings(hiddenimports)
+hiddenimports = list(set(safe_filter_strings(hiddenimports)))
 binaries = safe_filter_tuples(binaries)
 datas = safe_filter_tuples(datas)
-hiddenimports = list(set(hiddenimports))
 
-print(f"  Total hidden imports: {len(hiddenimports)}")
-print(f"  Total binaries: {len(binaries)}")
-print(f"  Total data files: {len(datas)}")
+print(f"\n[Summary Before Analysis]")
+print(f"  Hidden imports: {len(hiddenimports)}")
+print(f"  Binaries: {len(binaries)}")
+print(f"  Data files: {len(datas)}")
 
 # ==========================================
 # 排除模块
 # ==========================================
 excludes = [
-    'tkinter', '_tkinter',
-    'PyQt5', 'PyQt6', 'PySide2', 'PySide6', 'wx',
-    'matplotlib', 'pandas', 'scipy', 'sklearn',
-    'tensorflow', 'torch',
-    'pytest', 'IPython', 'jupyter', 'notebook',
-    'sphinx', 'docutils',
+    'tkinter', 'PyQt5', 'PyQt6', 'matplotlib', 
+    'pandas', 'scipy', 'pytest', 'IPython',
 ]
 
 # ==========================================
-# Analysis 配置
+# Analysis
 # ==========================================
-print("\n" + "=" * 60)
-print("Creating Analysis object...")
-print("=" * 60)
+print("\n" + "=" * 70)
+print("Creating Analysis...")
+print("=" * 70 + "\n")
 
 a = Analysis(
     ['step2stl.py'],
@@ -177,48 +152,44 @@ a = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    hookspath=['./hooks'],  # 🔧 指定自定义 hook 路径
+    hookspath=['./hooks'],  # 使用自定义 hook
     hooksconfig={},
     runtime_hooks=[],
     excludes=excludes,
     noarchive=False,
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
 )
 
-print("Analysis created successfully")
-
-# 移除 pkg_resources runtime hook
-print("\nRemoving problematic runtime hooks...")
-original_scripts = len(a.scripts)
+# 移除 pkg_resources hook
 a.scripts = [s for s in a.scripts if 'pyi_rth_pkgres' not in s[1]]
-print(f"  Removed {original_scripts - len(a.scripts)} hook(s)")
 
-# 过滤二进制文件
-print("\nFiltering binaries...")
-original_binaries = len(a.binaries)
+# 过滤不需要的二进制
+def should_keep(name):
+    if not isinstance(name, str):
+        return True
+    name_lower = name.lower()
+    exclude = ['test', 'example', 'doc', '.pdb']
+    return not any(e in name_lower for e in exclude)
 
-def should_exclude_binary(name):
-    exclude_patterns = ['test', 'example', 'doc', '.pdb', 'tcl', 'tk']
-    name_lower = name.lower() if isinstance(name, str) else ''
-    return any(pattern in name_lower for pattern in exclude_patterns)
+a.binaries = [(n, p, t) for n, p, t in a.binaries if should_keep(n)]
 
-a.binaries = [(name, path, typ) for name, path, typ in a.binaries 
-              if not should_exclude_binary(name)]
+print(f"[Final Analysis Summary]")
+print(f"  Scripts: {len(a.scripts)}")
+print(f"  Binaries: {len(a.binaries)}")
+print(f"  Data files: {len(a.datas)}")
 
-print(f"  Removed {original_binaries - len(a.binaries)} binaries")
-print(f"  Final count: {len(a.binaries)}")
+# 检查是否包含 TK 库
+tk_libs = [b[0] for b in a.binaries if 'TK' in b[0] or 'tk' in b[0].lower()]
+if tk_libs:
+    print(f"  ✓ Found {len(tk_libs)} OpenCASCADE TK libraries")
+else:
+    print(f"  ⚠️  WARNING: No TK libraries found in binaries!")
+
+print()
 
 # ==========================================
-# PYZ 配置
+# PYZ & EXE
 # ==========================================
-print("\nCreating PYZ archive...")
 pyz = PYZ(a.pure)
-
-# ==========================================
-# EXE 配置
-# ==========================================
-print("\nCreating EXE configuration...")
 
 exe = EXE(
     pyz,
@@ -228,20 +199,11 @@ exe = EXE(
     [],
     name='step2stl',
     debug=False,
-    bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=True,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=None,
 )
 
-print("\n" + "=" * 60)
+print("=" * 70)
 print("Build configuration completed!")
-print("=" * 60)
+print("=" * 70)

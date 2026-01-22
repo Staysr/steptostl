@@ -124,49 +124,76 @@ jobs:
       shell: bash -el {0}
       run: |
         echo "============================================================"
-        echo "Starting PyInstaller Build"
+        echo "Pre-Build Environment Check"
         echo "============================================================"
         
-        echo "CONDA_PREFIX: $CONDA_PREFIX"
-        echo ""
+        echo "CONDA_PREFIX: ${CONDA_PREFIX}"
+        echo "Python: $(python --version)"
+        echo "PyInstaller: $(pyinstaller --version)"
         
+        echo ""
         echo "Checking OpenCASCADE libraries..."
-        if [ -d "$CONDA_PREFIX/Library/bin" ]; then
-          echo "Windows DLLs:"
-          ls -lh "$CONDA_PREFIX/Library/bin" | grep -i "TK" | head -n 10 || echo "No TK DLLs found"
+        
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          LIB_DIR="${CONDA_PREFIX}/Library/bin"
+          if [ -d "$LIB_DIR" ]; then
+            echo "TK*.dll files in ${LIB_DIR}:"
+            ls -1 "${LIB_DIR}"/TK*.dll 2>/dev/null | wc -l | xargs echo "  Count:"
+            ls "${LIB_DIR}"/TK*.dll 2>/dev/null | head -n 5
+          else
+            echo "ERROR: ${LIB_DIR} not found!"
+          fi
+        else
+          LIB_DIR="${CONDA_PREFIX}/lib"
+          if [ -d "$LIB_DIR" ]; then
+            echo "libTK*.dylib files in ${LIB_DIR}:"
+            ls -1 "${LIB_DIR}"/libTK*.dylib 2>/dev/null | wc -l | xargs echo "  Count:"
+            ls "${LIB_DIR}"/libTK*.dylib 2>/dev/null | head -n 5
+          fi
         fi
         
         echo ""
-        echo "Cleaning previous builds..."
+        echo "============================================================"
+        echo "Starting PyInstaller Build"
+        echo "============================================================"
+        
         rm -rf build dist
         
-        echo ""
-        echo "Running PyInstaller with custom hooks..."
         pyinstaller --log-level=INFO step2stl.spec 2>&1 | tee build.log
         
         echo ""
         echo "============================================================"
-        echo "Build Complete!"
+        echo "Post-Build Verification"
         echo "============================================================"
         
-        echo "Output files:"
-        ls -lh dist/
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          EXE_FILE="dist/step2stl.exe"
+        else
+          EXE_FILE="dist/step2stl"
+        fi
         
-        if [ -f "dist/step2stl.exe" ]; then
-          FILE_SIZE=$(stat -c%s "dist/step2stl.exe" 2>/dev/null || stat -f%z "dist/step2stl.exe")
+        if [ -f "$EXE_FILE" ]; then
+          FILE_SIZE=$(stat -c%s "$EXE_FILE" 2>/dev/null || stat -f%z "$EXE_FILE")
           FILE_SIZE_MB=$((FILE_SIZE / 1024 / 1024))
-          echo ""
-          echo "SUCCESS: step2stl.exe created"
-          echo "File size: ${FILE_SIZE_MB}MB"
           
-          # 检查文件大小是否合理
+          echo "✓ Executable created: $EXE_FILE"
+          echo "  Size: ${FILE_SIZE_MB}MB"
+          
           if [ $FILE_SIZE_MB -lt 100 ]; then
-            echo "WARNING: File size seems too small (< 100MB)"
-            echo "OpenCASCADE libraries may not be included!"
+            echo ""
+            echo "⚠️  WARNING: File size is suspiciously small (< 100MB)"
+            echo "   This usually means OpenCASCADE libraries are missing"
+            echo ""
+            echo "Checking build log for 'TK' libraries..."
+            grep -i "TK.*\.dll\|TK.*\.dylib\|TK.*\.so" build.log | head -n 10
+          else
+            echo "  File size looks good!"
           fi
         else
+          echo "❌ ERROR: Executable not created!"
           echo ""
-          echo "ERROR: step2stl.exe not found!"
+          echo "Build log (last 100 lines):"
+          tail -n 100 build.log
           exit 1
         fi
     
