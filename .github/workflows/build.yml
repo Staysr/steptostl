@@ -14,7 +14,7 @@ env:
   PYTHON_MAC: "3.10"
   OCC_VERSION_WIN: "7.8.1"
   OCC_VERSION_MAC: "7.8.1"
-  PYINSTALLER_VERSION: "6.0.0"
+  PYINSTALLER_VERSION: "6.9.0"
 
 jobs:
   # ==========================================

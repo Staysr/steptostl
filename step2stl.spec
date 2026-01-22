@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
 step2stl PyInstaller 打包配置
-修复 Windows/macOS 兼容性问题
+修复 jaraco/pkg_resources 兼容性问题
 """
 
 from PyInstaller.utils.hooks import (
@@ -16,9 +16,15 @@ import sys
 # ==========================================
 hiddenimports = []
 
-# 🔧 标准库模块（简单列举，不用 collect_all）
+# 🔧 修复 PyInstaller 6.8+ jaraco 错误（预防性添加）
 hiddenimports += [
-    # Python 标准库
+    'jaraco',
+    'jaraco.text',
+    'jaraco.functools',
+]
+
+# 🔧 标准库模块
+hiddenimports += [
     'ipaddress',
     'urllib',
     'urllib.parse',
@@ -122,6 +128,9 @@ a = Analysis(
     noarchive=False,
 )
 
+# 🔧 关键修复：移除 pkg_resources runtime hook（防止 jaraco 错误）
+a.scripts = [s for s in a.scripts if 'pyi_rth_pkgres' not in s[1]]
+
 # ==========================================
 # 过滤二进制文件
 # ==========================================
@@ -134,7 +143,6 @@ def filter_binaries(binaries_list):
         '.pdb',
     ]
     for item in binaries_list:
-        # 处理不同格式的 binaries 项
         if isinstance(item, tuple) and len(item) >= 2:
             name = item[0]
             name_lower = name.lower() if isinstance(name, str) else ''
