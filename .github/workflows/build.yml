@@ -42,7 +42,7 @@ jobs:
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }}
         
         echo "Installing Python packages..."
-        pip install pyinstaller==5.13.2
+        pip install pyinstaller==6.3.0
         pip install trimesh==3.23.5
         pip install numpy
     
