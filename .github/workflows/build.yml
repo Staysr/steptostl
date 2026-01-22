@@ -129,76 +129,55 @@ jobs:
     - name: Build EXE
       shell: bash -el {0}
       run: |
-        echo "============================================================"
-        echo "Pre-Build Environment Check"
-        echo "============================================================"
+        echo "============================================================" 
+        echo "Pre-Build Checks" 
+        echo "============================================================" 
         
-        echo "CONDA_PREFIX: ${CONDA_PREFIX}"
-        echo "Python: $(python --version)"
-        echo "PyInstaller: $(pyinstaller --version)"
-        
-        echo ""
-        echo "Checking OpenCASCADE libraries..."
-        
-        if [ "$RUNNER_OS" == "Windows" ]; then
-          LIB_DIR="${CONDA_PREFIX}/Library/bin"
-          if [ -d "$LIB_DIR" ]; then
-            echo "TK*.dll files in ${LIB_DIR}:"
-            ls -1 "${LIB_DIR}"/TK*.dll 2>/dev/null | wc -l | xargs echo "  Count:"
-            ls "${LIB_DIR}"/TK*.dll 2>/dev/null | head -n 5
-          else
-            echo "ERROR: ${LIB_DIR} not found!"
-          fi
-        else
-          LIB_DIR="${CONDA_PREFIX}/lib"
-          if [ -d "$LIB_DIR" ]; then
-            echo "libTK*.dylib files in ${LIB_DIR}:"
-            ls -1 "${LIB_DIR}"/libTK*.dylib 2>/dev/null | wc -l | xargs echo "  Count:"
-            ls "${LIB_DIR}"/libTK*.dylib 2>/dev/null | head -n 5
-          fi
-        fi
+        echo "Python version:"
+        python --version
         
         echo ""
-        echo "============================================================"
-        echo "Starting PyInstaller Build"
-        echo "============================================================"
+        echo "PyInstaller version:"
+        pyinstaller --version
+        
+        echo ""
+        echo "CONDA_PREFIX:"
+        echo "${CONDA_PREFIX}"
+        
+        echo ""
+        echo "Checking hook file syntax..."
+        python -c "exec(open('hooks/hook-OCC.py', encoding='utf-8').read())" || {
+          echo "ERROR: hook-OCC.py has syntax errors"
+          exit 1
+        }
+        
+        echo ""
+        echo "Checking spec file syntax..."
+        python -c "exec(open('step2stl.spec', encoding='utf-8').read())" || {
+          echo "ERROR: step2stl.spec has syntax errors"
+          exit 1
+        }
+        
+        echo ""
+        echo "============================================================" 
+        echo "Starting PyInstaller Build" 
+        echo "============================================================" 
         
         rm -rf build dist
         
-        pyinstaller --log-level=INFO step2stl.spec 2>&1 | tee build.log
+        # Run with verbose output
+        pyinstaller --log-level=DEBUG step2stl.spec 2>&1 | tee build.log
+        
+        BUILD_EXIT_CODE=${PIPESTATUS[0]}
         
         echo ""
-        echo "============================================================"
-        echo "Post-Build Verification"
-        echo "============================================================"
+        echo "============================================================" 
+        echo "Build Exit Code: $BUILD_EXIT_CODE" 
+        echo "============================================================" 
         
-        if [ "$RUNNER_OS" == "Windows" ]; then
-          EXE_FILE="dist/step2stl.exe"
-        else
-          EXE_FILE="dist/step2stl"
-        fi
-        
-        if [ -f "$EXE_FILE" ]; then
-          FILE_SIZE=$(stat -c%s "$EXE_FILE" 2>/dev/null || stat -f%z "$EXE_FILE")
-          FILE_SIZE_MB=$((FILE_SIZE / 1024 / 1024))
-          
-          echo "✓ Executable created: $EXE_FILE"
-          echo "  Size: ${FILE_SIZE_MB}MB"
-          
-          if [ $FILE_SIZE_MB -lt 100 ]; then
-            echo ""
-            echo "⚠️  WARNING: File size is suspiciously small (< 100MB)"
-            echo "   This usually means OpenCASCADE libraries are missing"
-            echo ""
-            echo "Checking build log for 'TK' libraries..."
-            grep -i "TK.*\.dll\|TK.*\.dylib\|TK.*\.so" build.log | head -n 10
-          else
-            echo "  File size looks good!"
-          fi
-        else
-          echo "❌ ERROR: Executable not created!"
+        if [ $BUILD_EXIT_CODE -ne 0 ]; then
           echo ""
-          echo "Build log (last 100 lines):"
+          echo "Build failed! Last 100 lines of log:"
           tail -n 100 build.log
           exit 1
         fi
