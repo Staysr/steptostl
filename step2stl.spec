@@ -12,6 +12,22 @@ import sys
 # ==========================================
 hiddenimports = []
 
+# 🔧 修复：Windows 必须显式包含这些标准库模块
+hiddenimports += [
+    'ipaddress',
+    'urllib',
+    'urllib.parse',
+    'pathlib',
+    'email',
+    'email.mime',
+    'zipfile',
+    'argparse',
+    'time',
+    'gc',
+    'warnings',
+    'traceback',
+]
+
 # OCC 核心模块（只收集必要的）
 hiddenimports += [
     'OCC.Core.STEPControl',
@@ -66,11 +82,11 @@ excludes = [
     'tornado', 'zmq', 'jinja2', 'flask', 'django',
     
     # 测试相关
-    'pytest', 'unittest', 'nose',
+    'pytest', 'nose',
     
     # 其他
     'setuptools', 'pkg_resources',
-    'email', 'html', 'http', 'xmlrpc',
+    'xmlrpc',
     'pydoc', 'doctest',
 ]
 
@@ -88,12 +104,14 @@ a = Analysis(
     runtime_hooks=[],
     excludes=excludes,
     noarchive=False,
+    # 🔧 新增：Windows 兼容性优化
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
 )
 
 # ==========================================
 # 过滤不必要的二进制文件（进一步减小体积）
 # ==========================================
-# 移除调试符号和测试文件
 def filter_binaries(binaries):
     filtered = []
     exclude_patterns = [
@@ -128,7 +146,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=True if sys.platform != 'win32' else False,
-    upx=False,
+    upx=False,  # 🔧 建议：禁用 UPX（避免兼容性问题）
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
