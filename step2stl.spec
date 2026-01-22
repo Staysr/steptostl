@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
 step2stl PyInstaller 打包配置
-修复 jaraco/pkg_resources 兼容性问题
+修复 numpy 模块收集问题
 """
 
 from PyInstaller.utils.hooks import (
@@ -16,7 +16,7 @@ import sys
 # ==========================================
 hiddenimports = []
 
-# 🔧 修复 PyInstaller 6.8+ jaraco 错误（预防性添加）
+# 🔧 修复 PyInstaller 6.8+ jaraco 错误
 hiddenimports += [
     'jaraco',
     'jaraco.text',
@@ -60,20 +60,52 @@ hiddenimports += [
     'OCC.Core.gp',
 ]
 
-# trimesh 模块（收集所有子模块）
+# 🔧 关键修复：完整收集 numpy 模块
+print("Collecting numpy modules...")
+try:
+    # 方法1：收集所有 numpy 子模块（推荐）
+    hiddenimports += collect_submodules('numpy')
+    print(f"  ✓ Collected {len([m for m in hiddenimports if 'numpy' in m])} numpy modules")
+except Exception as e:
+    print(f"  Warning: Failed to collect numpy submodules: {e}")
+    # 方法2：手动添加关键模块（备用）
+    hiddenimports += [
+        'numpy',
+        'numpy.core',
+        'numpy.core._multiarray_umath',
+        'numpy.core.multiarray',
+        'numpy.core._methods',
+        'numpy.core._internal',
+        'numpy.core.function_base',
+        'numpy.random',
+        'numpy.random._pickle',
+        'numpy.fft',
+        'numpy.linalg',
+        'numpy.polynomial',
+        # 🔧 关键：添加缺失的模块
+        'numpy._core',
+        'numpy._core._multiarray_tests',
+        'numpy._core._multiarray_umath',
+        'numpy._core.multiarray',
+        'numpy._core._methods',
+        'numpy._core._internal',
+        'numpy._core.function_base',
+        'numpy._core._add_newdocs',
+        'numpy._core._dtype',
+        'numpy._core._exceptions',
+        'numpy._core.numerictypes',
+        'numpy._core.shape_base',
+        'numpy._core.numeric',
+        'numpy._core.fromnumeric',
+    ]
+
+# trimesh 模块
+print("Collecting trimesh modules...")
 try:
     hiddenimports += collect_submodules('trimesh')
-except:
-    pass
-
-# numpy 核心模块
-hiddenimports += [
-    'numpy',
-    'numpy.core',
-    'numpy.core._multiarray_umath',
-    'numpy.core.multiarray',
-    'numpy.random',
-]
+    print(f"  ✓ Collected trimesh modules")
+except Exception as e:
+    print(f"  Warning: Failed to collect trimesh: {e}")
 
 # ==========================================
 # 收集数据文件和动态库
@@ -93,6 +125,15 @@ try:
 except:
     pass
 
+# 🔧 numpy 数据文件（可能需要）
+try:
+    numpy_datas = collect_data_files('numpy', include_py_files=False)
+    if numpy_datas:
+        datas += numpy_datas
+        print(f"  ✓ Collected numpy data files")
+except:
+    pass
+
 # ==========================================
 # 排除不需要的模块
 # ==========================================
@@ -102,7 +143,7 @@ excludes = [
     'PyQt5', 'PyQt6',
     'PySide2', 'PySide6',
     
-    # 科学计算（不需要）
+    # 科学计算（不需要的部分）
     'matplotlib',
     'pandas',
     'scipy',
@@ -128,7 +169,7 @@ a = Analysis(
     noarchive=False,
 )
 
-# 🔧 关键修复：移除 pkg_resources runtime hook（防止 jaraco 错误）
+# 🔧 移除 pkg_resources runtime hook
 a.scripts = [s for s in a.scripts if 'pyi_rth_pkgres' not in s[1]]
 
 # ==========================================

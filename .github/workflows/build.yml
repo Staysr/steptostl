@@ -15,6 +15,7 @@ env:
   OCC_VERSION_WIN: "7.8.1"
   OCC_VERSION_MAC: "7.8.1"
   PYINSTALLER_VERSION: "6.9.0"
+  NUMPY_VERSION: "1.26.4"
 
 jobs:
   # ==========================================
@@ -45,7 +46,11 @@ jobs:
         echo "Installing Python packages..."
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh==3.23.5
-        pip install numpy
+        pip install numpy==${{ env.NUMPY_VERSION }}
+        python -c "import numpy; print('numpy version:', numpy.__version__)"
+        python -c "import numpy._core._multiarray_tests; print('numpy._core._multiarray_tests OK')"
+
+
     
     # 🔧 修复：Windows 编码问题
     - name: Verify installations
