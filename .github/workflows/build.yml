@@ -10,11 +10,13 @@ on:
   workflow_dispatch:
 
 env:
-  PYTHON_WIN: "3.9"
-  PYTHON_MAC: "3.10"
-  OCC_VERSION_WIN: "7.8.1"
-  OCC_VERSION_MAC: "7.8.1"
-  PYINSTALLER_VERSION: "6.9.0"
+  PYTHON_WIN: "3.9" 
+  PYTHON_MAC: "3.10" 
+  OCC_VERSION_WIN: "7.8.1" 
+  OCC_VERSION_MAC: "7.8.1" 
+  PYINSTALLER_VERSION: "6.9.0" 
+  PYTHONIOENCODING: "utf-8"
+  PYTHONUTF8: "1"
 
 jobs:
   # ==========================================
@@ -23,6 +25,10 @@ jobs:
   build-windows-x64:
     runs-on: windows-2019
     
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: 1
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
