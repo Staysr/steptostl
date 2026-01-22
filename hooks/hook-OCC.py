@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*- 
 """ 
 PyInstaller hook for pythonocc-core
-强制收集所有 OpenCASCADE 动态库和依赖
+Force collect all OpenCASCADE dynamic libraries and dependencies
 """ 
 
 import sys
 import os
 
 # ==========================================
-# 🔧 Windows 控制台编码修复
-# 适用于：Windows 7/8/10/11 所有版本
+# Windows Console Encoding Fix
+# Compatible with: Windows 7/8/10/11
 # ==========================================
-if sys.platform == 'win32':  # 在所有 Windows 版本上都生效
+if sys.platform == 'win32':
     os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
     
     try:
@@ -34,12 +34,12 @@ if sys.platform == 'win32':  # 在所有 Windows 版本上都生效
         pass
 
 # ==========================================
-# 安全打印函数
+# Safe Print Function
 # ==========================================
 _original_print = print
 
 def safe_print(*args, **kwargs):
-    """安全的打印函数，自动处理编码错误"""
+    """Safe print function with encoding error handling"""
     try:
         _original_print(*args, **kwargs)
     except (UnicodeEncodeError, UnicodeDecodeError):
@@ -55,7 +55,7 @@ def safe_print(*args, **kwargs):
 print = safe_print
 
 # ==========================================
-# 导入 PyInstaller 模块
+# Import PyInstaller Modules
 # ==========================================
 from PyInstaller.utils.hooks import collect_submodules, get_package_paths
 from PyInstaller.compat import is_win, is_darwin, is_linux
@@ -66,34 +66,34 @@ print("CUSTOM OCC HOOK: Collecting pythonocc-core dependencies")
 print("=" * 70) 
 
 # ==========================================
-# 1. 收集所有 Python 模块
+# 1. Collect All Python Modules
 # ==========================================
 hiddenimports = collect_submodules('OCC') 
-print(f"[1/4] Collected {len(hiddenimports)} OCC Python modules") 
+print("[1/4] Collected %d OCC Python modules" % len(hiddenimports)) 
 
 # ==========================================
-# 2. 初始化
+# 2. Initialize
 # ==========================================
 datas = [] 
 binaries = [] 
 
 # ==========================================
-# 3. 获取 OCC 包路径
+# 3. Get OCC Package Path
 # ==========================================
 try: 
     pkg_base, occ_pkg_dir = get_package_paths('OCC') 
-    print(f"[2/4] OCC package location: {occ_pkg_dir}") 
+    print("[2/4] OCC package location: %s" % occ_pkg_dir) 
 except Exception as e: 
-    print(f"ERROR: Cannot locate OCC package: {e}") 
+    print("ERROR: Cannot locate OCC package: %s" % str(e)) 
     occ_pkg_dir = None
 
 # ==========================================
-# 4. 收集 OCC Python 扩展模块 (.pyd/.so) 
+# 4. Collect OCC Python Extension Modules (.pyd/.so) 
 # ==========================================
 if occ_pkg_dir and os.path.exists(occ_pkg_dir): 
-    print(f"[3/4] Collecting OCC extension modules...") 
+    print("[3/4] Collecting OCC extension modules...") 
     
-    # 查找所有扩展文件
+    # Find all extension files
     if is_win: 
         ext_pattern = '*.pyd' 
     else: 
@@ -106,7 +106,7 @@ if occ_pkg_dir and os.path.exists(occ_pkg_dir):
                 src_path = os.path.join(root, file) 
                 rel_dir = os.path.relpath(root, occ_pkg_dir) 
                 
-                # 目标路径：保持 OCC 的目录结构
+                # Target path: keep OCC directory structure
                 if rel_dir == '.': 
                     dest_dir = 'OCC' 
                 else: 
@@ -115,48 +115,48 @@ if occ_pkg_dir and os.path.exists(occ_pkg_dir):
                 binaries.append((src_path, dest_dir)) 
                 ext_files.append(file) 
     
-    print(f"    Found {len(ext_files)} extension files") 
+    print("    Found %d extension files" % len(ext_files)) 
     for f in ext_files[:5]: 
-        print(f"      - {f}") 
+        print("      - %s" % f) 
     if len(ext_files) > 5: 
-        print(f"      ... and {len(ext_files) - 5} more") 
+        print("      ... and %d more" % (len(ext_files) - 5)) 
 
 # ==========================================
-# 5. 收集 OpenCASCADE 共享库（关键！） 
+# 5. Collect OpenCASCADE Shared Libraries (CRITICAL!) 
 # ==========================================
-print(f"[4/4] Collecting OpenCASCADE shared libraries...") 
+print("[4/4] Collecting OpenCASCADE shared libraries...") 
 
 conda_prefix = os.environ.get('CONDA_PREFIX', '') 
 if not conda_prefix: 
-    # 尝试从 Python 路径推断
+    # Try to infer from Python path
     python_exe = sys.executable
     if 'conda' in python_exe or 'miniconda' in python_exe.lower(): 
         conda_prefix = os.path.dirname(os.path.dirname(python_exe)) 
 
 if conda_prefix and os.path.exists(conda_prefix): 
-    print(f"    Conda environment: {conda_prefix}") 
+    print("    Conda environment: %s" % conda_prefix) 
     
     lib_dirs = [] 
     lib_patterns = [] 
     
     if is_win: 
-        # Windows: Library/bin 目录
+        # Windows: Library/bin directory
         lib_dirs = [ 
             os.path.join(conda_prefix, 'Library', 'bin'), 
             os.path.join(conda_prefix, 'Library', 'lib'), 
             os.path.join(conda_prefix, 'bin'), 
         ] 
-        # OpenCASCADE 库前缀
+        # OpenCASCADE library prefixes
         lib_patterns = [ 
-            'TK*.dll',           # OpenCASCADE 核心库
-            'freetype*.dll',     # 字体渲染
-            'freeimage*.dll',    # 图像处理
+            'TK*.dll',           # OpenCASCADE core libraries
+            'freetype*.dll',     # Font rendering
+            'freeimage*.dll',    # Image processing
             'tbb*.dll',          # Intel Threading Building Blocks
-            'msvcp*.dll',        # MSVC 运行时
-            'vcruntime*.dll',    # VC 运行时
+            'msvcp*.dll',        # MSVC runtime
+            'vcruntime*.dll',    # VC runtime
         ] 
     elif is_darwin: 
-        # macOS: lib 目录
+        # macOS: lib directory
         lib_dirs = [ 
             os.path.join(conda_prefix, 'lib'), 
         ] 
@@ -168,7 +168,7 @@ if conda_prefix and os.path.exists(conda_prefix):
             'libtbb*.dylib', 
         ] 
     else: 
-        # Linux: lib 目录
+        # Linux: lib directory
         lib_dirs = [ 
             os.path.join(conda_prefix, 'lib'), 
             os.path.join(conda_prefix, 'lib64'), 
@@ -185,49 +185,49 @@ if conda_prefix and os.path.exists(conda_prefix):
         if not os.path.exists(lib_dir): 
             continue
         
-        print(f"    Searching in: {lib_dir}") 
+        print("    Searching in: %s" % lib_dir) 
         
         for pattern in lib_patterns: 
             lib_files = glob.glob(os.path.join(lib_dir, pattern)) 
             for lib_file in lib_files: 
                 lib_name = os.path.basename(lib_file) 
                 
-                # 跳过符号链接（在 macOS/Linux 上） 
+                # Skip symbolic links (on macOS/Linux) 
                 if os.path.islink(lib_file) and not is_win: 
                     continue
                 
-                # 添加到根目录（与主程序同级） 
+                # Add to root directory (same level as main program) 
                 binaries.append((lib_file, '.')) 
                 collected_libs.append(lib_name) 
     
-    print(f"    Collected {len(collected_libs)} shared libraries:") 
-    # 按类型分组显示
+    print("    Collected %d shared libraries:" % len(collected_libs)) 
+    # Group by type
     tk_libs = [l for l in collected_libs if 'TK' in l or 'tk' in l.lower()] 
     other_libs = [l for l in collected_libs if 'TK' not in l and 'tk' not in l.lower()] 
     
     if tk_libs: 
-        print(f"      OpenCASCADE (TK*): {len(tk_libs)} files") 
+        print("      OpenCASCADE (TK*): %d files" % len(tk_libs)) 
         for lib in tk_libs[:3]: 
-            print(f"        - {lib}") 
+            print("        - %s" % lib) 
         if len(tk_libs) > 3: 
-            print(f"        ... and {len(tk_libs) - 3} more") 
+            print("        ... and %d more" % (len(tk_libs) - 3)) 
     
     if other_libs: 
-        print(f"      Dependencies: {len(other_libs)} files") 
+        print("      Dependencies: %d files" % len(other_libs)) 
         for lib in other_libs[:3]: 
-            print(f"        - {lib}") 
+            print("        - %s" % lib) 
         if len(other_libs) > 3: 
-            print(f"        ... and {len(other_libs) - 3} more") 
+            print("        ... and %d more" % (len(other_libs) - 3)) 
     
     if not collected_libs: 
         print("    WARNING: No OpenCASCADE libraries found!") 
-        print(f"    Please verify conda environment: {conda_prefix}") 
+        print("    Please verify conda environment: %s" % conda_prefix) 
 else: 
     print("    WARNING: CONDA_PREFIX not found!") 
     print("    OpenCASCADE libraries may not be included!") 
 
 # ==========================================
-# 6. 收集 OCC 数据文件
+# 6. Collect OCC Data Files
 # ==========================================
 if occ_pkg_dir and os.path.exists(occ_pkg_dir): 
     for root, dirs, files in os.walk(occ_pkg_dir): 
@@ -242,20 +242,20 @@ if occ_pkg_dir and os.path.exists(occ_pkg_dir):
                 datas.append((src, dest)) 
 
 # ==========================================
-# 汇总
+# Summary
 # ==========================================
 print("\n" + "=" * 70) 
 print("OCC HOOK SUMMARY:") 
-print(f"  Hidden imports: {len(hiddenimports)}") 
-print(f"  Binary files:   {len(binaries)}") 
-print(f"  Data files:     {len(datas)}") 
+print("  Hidden imports: %d" % len(hiddenimports)) 
+print("  Binary files:   %d" % len(binaries)) 
+print("  Data files:     %d" % len(datas)) 
 print("=" * 70 + "\n") 
 
-# 验证关键库是否被收集
+# Verify critical libraries are collected
 tk_count = len([b for b in binaries if 'TK' in b[0] or 'tk' in b[0].lower()]) 
 if tk_count == 0: 
     print("WARNING: No TK* libraries found!") 
     print("   The built executable may fail with 'pythonocc-core not installed' error") 
     print("   Please check your conda environment setup.\n") 
 else: 
-    print(f"SUCCESS: {tk_count} OpenCASCADE TK libraries will be included\n")
+    print("SUCCESS: %d OpenCASCADE TK libraries will be included\n" % tk_count)

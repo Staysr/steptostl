@@ -1,30 +1,30 @@
 # -*- mode: python ; coding: utf-8 -*- 
 """ 
-step2stl PyInstaller 打包配置
-增强版 - 强制包含所有 OCC 依赖
+step2stl PyInstaller Build Configuration
+Enhanced - Force include all OCC dependencies
 """ 
 
 import sys
 import os
 
 # ==========================================
-# 🔧 Windows 控制台编码修复（必须在最开始）
-# 适用于：Windows 7/8/10/11 所有版本
+# Windows Console Encoding Fix (MUST BE FIRST)
+# Compatible with: Windows 7/8/10/11
 # ==========================================
-if sys.platform == 'win32':  # 在所有 Windows 版本上都生效
-    # 设置环境变量强制 UTF-8
+if sys.platform == 'win32':  # Works on all Windows versions
+    # Force UTF-8 encoding
     os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
     
-    # 重新包装标准输出流
+    # Rewrap standard output streams
     try:
         import io
-        # 检查是否有 buffer 属性（避免在某些环境下报错）
+        # Check for buffer attribute (avoid errors in some environments)
         if hasattr(sys.stdout, 'buffer'):
             sys.stdout = io.TextIOWrapper(
                 sys.stdout.buffer, 
                 encoding='utf-8', 
-                errors='replace',  # 遇到无法编码的字符用 ? 替代
-                line_buffering=True  # 行缓冲，实时输出
+                errors='replace',  # Replace unencodable chars with ?
+                line_buffering=True  # Line buffering for real-time output
             )
         if hasattr(sys.stderr, 'buffer'):
             sys.stderr = io.TextIOWrapper(
@@ -34,39 +34,39 @@ if sys.platform == 'win32':  # 在所有 Windows 版本上都生效
                 line_buffering=True
             )
     except Exception:
-        # 如果失败也不影响后续流程
+        # If it fails, don't block the rest of the process
         pass
 
 # ==========================================
-# 安全打印函数（处理 emoji 和特殊字符）
+# Safe Print Function (handle emoji and special chars)
 # ==========================================
 _original_print = print
 
 def safe_print(*args, **kwargs):
     """
-    安全的打印函数，自动处理编码错误
-    如果遇到无法显示的字符，自动降级为 ASCII 模式
+    Safe print function with automatic encoding error handling
+    If encountering undisplayable characters, automatically downgrade to ASCII mode
     """
     try:
         _original_print(*args, **kwargs)
     except (UnicodeEncodeError, UnicodeDecodeError):
-        # 降级处理：移除特殊字符
+        # Downgrade: remove special characters
         safe_args = []
         for arg in args:
             try:
-                # 尝试转换为 ASCII 安全字符串
+                # Try to convert to ASCII-safe string
                 safe_arg = str(arg).encode('ascii', 'replace').decode('ascii')
                 safe_args.append(safe_arg)
             except Exception:
-                # 最后的保险：使用 repr
+                # Last resort: use repr
                 safe_args.append(repr(arg))
         _original_print(*safe_args, **kwargs)
 
-# 替换全局 print 函数
+# Replace global print function
 print = safe_print
 
 # ==========================================
-# 导入 PyInstaller 模块
+# Import PyInstaller Modules
 # ==========================================
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
@@ -75,23 +75,23 @@ print("step2stl PyInstaller Build Configuration")
 print("=" * 70) 
 
 # ==========================================
-# 环境检查
+# Environment Check
 # ==========================================
 print("\n[Environment Check]") 
-print(f"Python: {sys.version}") 
-print(f"Platform: {sys.platform}") 
-print(f"Python executable: {sys.executable}") 
+print("Python: %s" % sys.version) 
+print("Platform: %s" % sys.platform) 
+print("Python executable: %s" % sys.executable) 
 
 conda_prefix = os.environ.get('CONDA_PREFIX', '') 
 if conda_prefix: 
-    print(f"Conda prefix: {conda_prefix}") 
+    print("Conda prefix: %s" % conda_prefix) 
 else: 
     print("WARNING: CONDA_PREFIX not set!") 
 
 print() 
 
 # ==========================================
-# 辅助函数
+# Helper Functions
 # ==========================================
 def safe_filter_strings(items): 
     if not items: 
@@ -109,14 +109,14 @@ def safe_filter_tuples(items):
     return filtered
 
 # ==========================================
-# 初始化
+# Initialize
 # ==========================================
 hiddenimports = [] 
 datas = [] 
 binaries = [] 
 
 # ==========================================
-# 收集 numpy
+# Collect numpy
 # ==========================================
 print("[Collecting numpy]") 
 try: 
@@ -124,36 +124,36 @@ try:
     hiddenimports += safe_filter_strings(numpy_result[0]) 
     binaries += safe_filter_tuples(numpy_result[1]) 
     datas += safe_filter_tuples(numpy_result[2]) 
-    print(f"  OK Collected numpy") 
+    print("  [OK] Collected numpy") 
 except Exception as e: 
-    print(f"  WARNING: {e}") 
+    print("  [WARNING] %s" % str(e)) 
     hiddenimports += ['numpy', 'numpy.core', 'numpy._core'] 
 
 # ==========================================
-# 收集 jaraco
+# Collect jaraco
 # ==========================================
 print("\n[Collecting jaraco]") 
 try: 
     jaraco_result = collect_all('jaraco') 
     hiddenimports += safe_filter_strings(jaraco_result[0]) 
     datas += safe_filter_tuples(jaraco_result[2]) 
-    print(f"  OK Collected jaraco") 
+    print("  [OK] Collected jaraco") 
 except Exception as e: 
-    print(f"  WARNING: {e}") 
+    print("  [WARNING] %s" % str(e)) 
     hiddenimports += ['jaraco', 'jaraco.text', 'jaraco.functools'] 
 
 # ==========================================
-# 标准库
+# Standard Library
 # ==========================================
 print("\n[Adding standard library modules]") 
 hiddenimports += [ 
     'ipaddress', 'urllib', 'urllib.parse', 'pathlib', 'argparse', 
     'collections', 'collections.abc', 'warnings', 'traceback', 
 ] 
-print(f"  OK Added standard modules") 
+print("  [OK] Added standard modules") 
 
 # ==========================================
-# 收集 OCC (会使用自定义 hook) 
+# Collect OCC (will use custom hook) 
 # ==========================================
 print("\n[Collecting OCC modules]") 
 occ_modules = [ 
@@ -166,35 +166,35 @@ hiddenimports += occ_modules
 try: 
     occ_all = collect_submodules('OCC.Core') 
     hiddenimports += safe_filter_strings(occ_all) 
-    print(f"  OK Collected {len(occ_all)} OCC.Core modules") 
+    print("  [OK] Collected %d OCC.Core modules" % len(occ_all)) 
 except Exception:
     pass
 
 # ==========================================
-# 收集 trimesh
+# Collect trimesh
 # ==========================================
 print("\n[Collecting trimesh]") 
 try: 
     trimesh_modules = collect_submodules('trimesh') 
     hiddenimports += safe_filter_strings(trimesh_modules) 
-    print(f"  OK Collected trimesh") 
+    print("  [OK] Collected trimesh") 
 except Exception:
     hiddenimports += ['trimesh'] 
 
 # ==========================================
-# 去重和验证
+# Deduplicate and Validate
 # ==========================================
 hiddenimports = list(set(safe_filter_strings(hiddenimports))) 
 binaries = safe_filter_tuples(binaries) 
 datas = safe_filter_tuples(datas) 
 
-print(f"\n[Summary Before Analysis]") 
-print(f"  Hidden imports: {len(hiddenimports)}") 
-print(f"  Binaries: {len(binaries)}") 
-print(f"  Data files: {len(datas)}") 
+print("\n[Summary Before Analysis]") 
+print("  Hidden imports: %d" % len(hiddenimports)) 
+print("  Binaries: %d" % len(binaries)) 
+print("  Data files: %d" % len(datas)) 
 
 # ==========================================
-# 排除模块
+# Exclude Modules
 # ==========================================
 excludes = [ 
     'tkinter', 'PyQt5', 'PyQt6', 'matplotlib', 
@@ -214,17 +214,17 @@ a = Analysis(
     binaries=binaries, 
     datas=datas, 
     hiddenimports=hiddenimports, 
-    hookspath=['./hooks'],  # 使用自定义 hook
+    hookspath=['./hooks'],  # Use custom hook
     hooksconfig={}, 
     runtime_hooks=[], 
     excludes=excludes, 
     noarchive=False, 
 ) 
 
-# 移除 pkg_resources hook
+# Remove pkg_resources hook
 a.scripts = [s for s in a.scripts if 'pyi_rth_pkgres' not in s[1]] 
 
-# 过滤不需要的二进制
+# Filter unnecessary binaries
 def should_keep(name): 
     if not isinstance(name, str): 
         return True
@@ -234,17 +234,17 @@ def should_keep(name):
 
 a.binaries = [(n, p, t) for n, p, t in a.binaries if should_keep(n)] 
 
-print(f"[Final Analysis Summary]") 
-print(f"  Scripts: {len(a.scripts)}") 
-print(f"  Binaries: {len(a.binaries)}") 
-print(f"  Data files: {len(a.datas)}") 
+print("[Final Analysis Summary]") 
+print("  Scripts: %d" % len(a.scripts)) 
+print("  Binaries: %d" % len(a.binaries)) 
+print("  Data files: %d" % len(a.datas)) 
 
-# 检查是否包含 TK 库
+# Check if TK libraries are included
 tk_libs = [b[0] for b in a.binaries if 'TK' in b[0] or 'tk' in b[0].lower()] 
 if tk_libs: 
-    print(f"  OK Found {len(tk_libs)} OpenCASCADE TK libraries") 
+    print("  [OK] Found %d OpenCASCADE TK libraries" % len(tk_libs)) 
 else: 
-    print(f"  WARNING: No TK libraries found in binaries!") 
+    print("  [WARNING] No TK libraries found in binaries!") 
 
 print() 
 
