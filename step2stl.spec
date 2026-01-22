@@ -66,28 +66,11 @@ binaries += collect_dynamic_libs('OCC')
 # 排除不需要的模块（减小体积）
 # ==========================================
 excludes = [
-    # GUI 相关
-    'tkinter', '_tkinter', 'tcl', 'tk',
-    'PyQt5', 'PyQt6', 'PySide2', 'PySide6',
-    'wx', 'gtk',
-    
-    # 科学计算（不需要）
-    'matplotlib', 'PIL', 'pillow',
-    'pandas', 'scipy', 'sklearn', 'scikit-learn',
-    
-    # Jupyter 相关
-    'IPython', 'jupyter', 'notebook', 'jupyterlab',
-    
-    # 网络相关
-    'tornado', 'zmq', 'jinja2', 'flask', 'django',
-    
-    # 测试相关
-    'pytest', 'nose',
-    
-    # 其他
-    'setuptools', 'pkg_resources',
-    'xmlrpc',
-    'pydoc', 'doctest',
+    'tkinter', '_tkinter',
+    'PyQt5', 'PyQt6',
+    'matplotlib',
+    'pandas',
+    'IPython',
 ]
 
 # ==========================================
