@@ -163,6 +163,9 @@ _safe_print("\n" + "=" * 70)
 _safe_print("Creating Analysis...")
 _safe_print("=" * 70 + "\n")
 
+# NOTE: Analysis, PYZ, EXE are injected by PyInstaller at runtime
+# They are not available during normal Python execution
+
 a = Analysis(
     ['step2stl.py'],
     pathex=[],
