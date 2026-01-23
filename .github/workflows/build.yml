@@ -10,11 +10,10 @@ on:
   workflow_dispatch:
 
 env:
-  # Win7 兼容黄金组合
+  # Win7 兼容配置
   PYTHON_WIN: "3.8"
   OCC_VERSION_WIN: "7.7.2"
   
-  # Mac 保持最新
   PYTHON_MAC: "3.10"
   OCC_VERSION_MAC: "7.8.1"
   
@@ -24,7 +23,7 @@ env:
 
 jobs:
   # ==========================================
-  # Windows x64 构建 (Nuclear Mode)
+  # Windows x64 构建 (Win7 Ultimate Fix)
   # ==========================================
   build-windows-x64:
     runs-on: windows-2019
@@ -49,23 +48,38 @@ jobs:
     - name: Install dependencies
       shell: bash -el {0}
       run: |
-        echo "============================================================"
-        echo "Installing Dependencies (Win7 Nuclear Mode)"
-        echo "============================================================"
-
-        # 1. 安装核心库
-        # 重点：确保 ucrt 和 vs2015_runtime 被安装
+        echo "Installing Dependencies"
+        # 强制安装核心库
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }} "numpy<2.0" libpython ucrt vs2015_runtime
         
-        # 2. Pip 安装工具
+        # Pip 安装
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh==3.23.5
         pip install "jaraco.text>=3.0" "jaraco.functools>=3.5.0" "jaraco.context>=4.0"
-        
-        # 3. 调试信息
-        python -c "import sys; print(f'Python: {sys.version}')"
-        python -c "import numpy; print(f'Numpy: {numpy.__version__}')"
 
+    # [关键步骤 1] 创建 Win7 路径修复钩子
+    # 这个脚本强制把程序运行目录加入 PATH，解决 DLL 找不到的问题
+    - name: Create Win7 PATH Hook
+      shell: bash -el {0}
+      run: |
+        echo "Creating Win7 PATH fixer..."
+        cat > rthook_win7.py <<EOF
+        import os
+        import sys
+        try:
+            # 获取程序运行时的临时目录 (_MEIxxxx)
+            if hasattr(sys, '_MEIPASS'):
+                base_path = sys._MEIPASS
+            else:
+                base_path = os.path.dirname(os.path.abspath(__file__))
+            
+            # 将该目录强行加到 PATH 最前面
+            os.environ['PATH'] = base_path + ';' + os.environ.get('PATH', '')
+        except Exception:
+            pass
+        EOF
+
+    # [关键步骤 2] 创建中文编码修复钩子
     - name: Create Encoding Hook
       shell: bash -el {0}
       run: |
@@ -84,8 +98,11 @@ jobs:
     - name: Build EXE
       shell: bash -el {0}
       run: |
-        echo "Starting Build with Nuclear Spec..."
-        # 使用新的 Spec 文件打包
+        echo "Starting Build..."
+        # 确保钩子文件存在
+        ls -lh rthook_*.py
+        
+        # 执行打包
         pyinstaller --log-level=INFO step2stl.spec
         ls -lh dist/
     
@@ -138,7 +155,9 @@ jobs:
         pip install trimesh
     - name: Create Dummy Hook
       shell: bash -el {0}
-      run: touch rthook_encoding.py
+      run: |
+        touch rthook_encoding.py
+        touch rthook_win7.py
     - name: Build Binary
       shell: bash -el {0}
       run: pyinstaller step2stl.spec
@@ -183,7 +202,9 @@ jobs:
         pip install trimesh
     - name: Create Dummy Hook
       shell: bash -el {0}
-      run: touch rthook_encoding.py
+      run: |
+        touch rthook_encoding.py
+        touch rthook_win7.py
     - name: Build Binary
       shell: bash -el {0}
       run: pyinstaller step2stl.spec

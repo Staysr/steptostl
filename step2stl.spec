@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-step2stl PyInstaller Build Configuration (Win7 OCC/TK Fix)
+step2stl PyInstaller Build Configuration (Win7 FINAL FIX)
 """
 
 import sys
@@ -35,7 +35,7 @@ def sanitize_tuples(raw_list):
     return list(set(clean))
 
 _safe_print("=" * 70)
-_safe_print("step2stl Build Config (Win7 + OCC DLL Fix)")
+_safe_print("step2stl Build Config (Win7 PATH FIX)")
 _safe_print("=" * 70)
 
 # ==========================================
@@ -62,46 +62,54 @@ pathex = []
 # ==========================================
 if sys.platform == 'win32' and conda_prefix:
     lib_bin = os.path.join(conda_prefix, 'Library', 'bin')
+    conda_bin = os.path.join(conda_prefix, 'bin')
     
-    if os.path.exists(lib_bin):
-        pathex.append(lib_bin)
-        _safe_print("\n[Collecting Critical DLLs]")
+    # 将可能的路径都加上
+    search_dirs = [lib_bin, conda_bin]
+    
+    for d in search_dirs:
+        if os.path.exists(d):
+            pathex.append(d)
+    
+    _safe_print("\n[Collecting Critical DLLs]")
+    
+    # 针对 Win7 的全量 DLL 收集
+    # 注意：这里我们增加了 d3dcompiler (Direct3D) 和 opengl，防止图形库报错
+    dll_patterns = [
+        'TK*.dll',         # OCC Core
+        'tbb*.dll',        # TBB
+        'freeimage*.dll',  # FreeImage
+        'freetype*.dll',   # Freetype
+        'gl*.dll', 'opengl*.dll', # OpenGL
+        'd3dcompiler*.dll', # Direct3D (Win7 sometimes lacks this)
+        'mkl_*.dll', 'libopenblas*.dll', 'libiomp5md.dll', # Numpy
+        'api-ms-win-*.dll', # UCRT Forwarders
+        'ucrtbase.dll',
+        'vcruntime*.dll',
+        'msvcp*.dll',
+        'concrt*.dll',
+        'zlib*.dll',
+        'sqlite3.dll'
+    ]
+    
+    count = 0
+    for s_dir in search_dirs:
+        if not os.path.exists(s_dir): continue
         
-        # 4.1 OpenCASCADE Core DLLs (The missing link for StlAPI)
-        # OCC 的核心是由几十个 TK 开头的 DLL 组成的，必须全部打包
-        occ_patterns = [
-            'TK*.dll',         # OCC 核心组件 (TKKernel, TKMath, TKStl...)
-            'tbb*.dll',        # Intel TBB (OCC 依赖)
-            'freeimage*.dll',  # 图像处理 (OCC 依赖)
-            'freetype*.dll',   # 字体 (OCC 依赖)
-            'gl*.dll',         # OpenGL
-            'freet*.dll'
-        ]
-
-        # 4.2 Win7 System / Numpy DLLs
-        sys_patterns = [
-            'mkl_*.dll', 'libopenblas*.dll', 'libiomp5md.dll',
-            'api-ms-win-*.dll', # Win7 API 垫片
-            'ucrtbase.dll',     # C 运行时
-            'vcruntime*.dll',   # VC 运行时
-            'msvcp*.dll',       # VC++ 运行时
-            'concrt*.dll',
-            'zlib*.dll'
-        ]
-        
-        all_patterns = occ_patterns + sys_patterns
-        
-        count = 0
-        for pattern in all_patterns:
-            found_dlls = glob.glob(os.path.join(lib_bin, pattern))
-            for dll in found_dlls:
-                # 排除 debug 版本 (以 d.dll 结尾) 减小体积
+        for pattern in dll_patterns:
+            found = glob.glob(os.path.join(s_dir, pattern))
+            for dll in found:
+                # 排除 debug DLL
                 if dll.lower().endswith('d.dll') and not dll.lower().endswith('bnd.dll'):
                     continue
+                # 排除 python3.dll (防止冲突)
+                if 'python3.dll' in dll.lower():
+                    continue
+                    
                 binaries.append((dll, '.'))
                 count += 1
-                
-        _safe_print(f"  Collected {count} DLLs (TK*, TBB, System)")
+
+    _safe_print(f"  Collected {count} DLLs for bundling.")
 
 # ==========================================
 # 5. Collect Python Dependencies
@@ -130,19 +138,20 @@ try:
 except:
     hiddenimports.append('trimesh')
 
-# OCC (Python side)
+# OCC
 hiddenimports.extend([
     'OCC', 'OCC.Core',
     'OCC.Core.STEPControl', 'OCC.Core.StlAPI', 'OCC.Core.BRepMesh',
     'OCC.Core.IFSelect', 'OCC.Core.Bnd', 'OCC.Core.BRepBndLib',
-    'OCC.Core.TCollection', 'OCC.Core.Standard', 'OCC.Core.TopoDS'
+    'OCC.Core.TCollection', 'OCC.Core.Standard', 'OCC.Core.TopoDS',
+    'OCC.Core.Wrappers' # 可能会用到
 ])
 
 # Misc
 hiddenimports.extend([
     'ipaddress', 'urllib', 'urllib.parse', 'pathlib', 'argparse',
     'collections', 'collections.abc', 'warnings', 'traceback',
-    'shutil', 'tempfile', 'copy', 'zipfile', 'ctypes'
+    'shutil', 'tempfile', 'copy', 'zipfile', 'ctypes', 'typing', 'sys', 'os'
 ])
 
 # ==========================================
@@ -165,7 +174,8 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=['./hooks'],
     hooksconfig={},
-    runtime_hooks=['./rthook_encoding.py'],
+    # 关键修改：同时加载 Win7 路径修复钩子 和 编码修复钩子
+    runtime_hooks=['./rthook_win7.py', './rthook_encoding.py'],
     excludes=['tkinter', 'PyQt5', 'PyQt6', 'matplotlib', 'scipy', 'pytest', 'IPython', 'numpy.f2py.tests'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -173,7 +183,6 @@ a = Analysis(
     noarchive=False,
 )
 
-# Remove pkg_resources
 a.scripts = [s for s in a.scripts if 'pyi_rth_pkgres' not in s[1]]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
@@ -188,7 +197,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False, # Win7 必须关闭 UPX
+    upx=False, 
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
