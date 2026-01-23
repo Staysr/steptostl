@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-step2stl PyInstaller Build Configuration (Fixed for Windows/Conda)
+step2stl PyInstaller Build Configuration (Sanitized)
 """
 
 import sys
@@ -9,7 +9,7 @@ import glob
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 # ==========================================
-# Safe print function
+# 1. Helper Functions (Fixes TypeError)
 # ==========================================
 def _safe_print(msg):
     try:
@@ -17,16 +17,40 @@ def _safe_print(msg):
     except:
         pass
 
+def sanitize_imports(raw_list):
+    """
+    过滤 hiddenimports，确保里面全是字符串。
+    解决 TypeError: expected string or bytes-like object
+    """
+    clean = []
+    if not raw_list:
+        return clean
+    for item in raw_list:
+        if item and isinstance(item, str):
+            clean.append(item)
+    return list(set(clean))  # 去重
+
+def sanitize_tuples(raw_list):
+    """过滤 binaries 和 datas，确保是 (str, str) 格式"""
+    clean = []
+    if not raw_list:
+        return clean
+    for item in raw_list:
+        if isinstance(item, tuple) and len(item) == 2:
+            # 确保元组里的元素也是字符串
+            if isinstance(item[0], str) and isinstance(item[1], str):
+                clean.append(item)
+    return list(set(clean))
+
 _safe_print("=" * 70)
-_safe_print("step2stl Build Configuration (Refined)")
+_safe_print("step2stl Build Config (Sanitized Mode)")
 _safe_print("=" * 70)
 
 # ==========================================
-# Helper: Detect Conda
+# 2. Environment & Conda Detection
 # ==========================================
 conda_prefix = os.environ.get('CONDA_PREFIX')
 if not conda_prefix:
-    # Try to guess from executable path
     try:
         if 'conda' in sys.executable.lower():
             conda_prefix = os.path.dirname(os.path.dirname(sys.executable))
@@ -37,7 +61,7 @@ _safe_print("CONDA_PREFIX: %s" % conda_prefix)
 _safe_print("Platform: %s" % sys.platform)
 
 # ==========================================
-# Initialize
+# 3. Initialization
 # ==========================================
 hiddenimports = []
 datas = []
@@ -45,113 +69,108 @@ binaries = []
 pathex = []
 
 # ==========================================
-# Windows Conda DLL Fix (Crucial for Numpy/OCC)
+# 4. Windows Conda DLL Fix
 # ==========================================
 if sys.platform == 'win32' and conda_prefix:
     _safe_print("\n[Windows Conda Fix]")
-    # 1. Add Library/bin to pathex so PyInstaller can find DLLs during analysis
     lib_bin = os.path.join(conda_prefix, 'Library', 'bin')
     if os.path.exists(lib_bin):
         _safe_print("  Adding to pathex: %s" % lib_bin)
         pathex.append(lib_bin)
         
-        # 2. Manually collect critical DLLs that hooks often miss
-        # Numpy often needs MKL or OpenBLAS, OCC needs TBB/FreeImage
+        # Manually collect critical DLLs
         dll_patterns = [
-            'mkl_*.dll', 'libopenblas*.dll', 'libiomp5md.dll', # Numpy/BLAS
-            'tbb*.dll', 'freeimage*.dll', 'freetype*.dll',     # OCC Deps
-            'zlib*.dll', 'lzma*.dll'                           # Compression
+            'mkl_*.dll', 'libopenblas*.dll', 'libiomp5md.dll',
+            'tbb*.dll', 'freeimage*.dll', 'freetype*.dll',
+            'zlib*.dll', 'lzma*.dll'
         ]
         
-        count = 0
         for pattern in dll_patterns:
             for dll in glob.glob(os.path.join(lib_bin, pattern)):
-                # (source, destination_folder)
                 binaries.append((dll, '.'))
-                count += 1
-        _safe_print("  Manually added %d critical DLLs from Library/bin" % count)
 
 # ==========================================
-# Collect Packages
+# 5. Collect Dependencies
 # ==========================================
 
-# 1. Numpy
+# --- Numpy ---
 _safe_print("\n[Collecting numpy]")
 try:
-    # collect_all finds the package, but sometimes misses external DLLs handled above
     np_hidden, np_bin, np_data = collect_all('numpy')
-    hiddenimports += np_hidden
-    binaries += np_bin
-    datas += np_data
+    if np_hidden: hiddenimports.extend(np_hidden)
+    if np_bin: binaries.extend(np_bin)
+    if np_data: datas.extend(np_data)
 except Exception as e:
     _safe_print("  Warning: %s" % e)
-    hiddenimports += ['numpy', 'numpy.core', 'numpy._core']
+    hiddenimports.extend(['numpy', 'numpy.core', 'numpy._core'])
 
-# 2. Jaraco (Dependency hell often lives here)
+# --- Jaraco ---
 _safe_print("\n[Collecting jaraco]")
 try:
     j_hidden, j_bin, j_data = collect_all('jaraco')
-    hiddenimports += j_hidden
-    datas += j_data
+    if j_hidden: hiddenimports.extend(j_hidden)
+    if j_data: datas.extend(j_data)
 except:
-    hiddenimports += ['jaraco.text', 'jaraco.functools', 'jaraco.context']
+    hiddenimports.extend(['jaraco.text', 'jaraco.functools', 'jaraco.context'])
 
-# 3. Trimesh
+# --- Trimesh ---
 _safe_print("\n[Collecting trimesh]")
 try:
     tm_hidden = collect_submodules('trimesh')
-    hiddenimports += tm_hidden
+    if tm_hidden: hiddenimports.extend(tm_hidden)
 except:
-    hiddenimports += ['trimesh']
+    hiddenimports.append('trimesh')
 
-# 4. Standard Library & Misc
-hiddenimports += [
+# --- Standard Lib ---
+hiddenimports.extend([
     'ipaddress', 'urllib', 'urllib.parse', 'pathlib', 'argparse',
     'collections', 'collections.abc', 'warnings', 'traceback',
     'shutil', 'tempfile', 'copy', 'zipfile'
-]
+])
 
-# 5. OCC (Core logic handled by hook-OCC.py, but adding safety here)
-hiddenimports += [
+# --- OCC ---
+hiddenimports.extend([
     'OCC', 'OCC.Core',
     'OCC.Core.STEPControl', 'OCC.Core.StlAPI', 'OCC.Core.BRepMesh',
     'OCC.Core.IFSelect', 'OCC.Core.Bnd', 'OCC.Core.BRepBndLib',
-]
+])
 
 # ==========================================
-# Analysis
+# 6. SANITIZE DATA (Critical Step)
+# ==========================================
+# 这里是修复 TypeError 的关键步骤
+# PyInstaller 不能处理 None 或非字符串类型，必须清洗
+_safe_print("\n[Sanitizing Data]")
+hiddenimports = sanitize_imports(hiddenimports)
+binaries = sanitize_tuples(binaries)
+datas = sanitize_tuples(datas)
+
+_safe_print("  Hidden Imports: %d" % len(hiddenimports))
+_safe_print("  Binaries: %d" % len(binaries))
+
+# ==========================================
+# 7. Analysis
 # ==========================================
 block_cipher = None
 
 a = Analysis(
     ['step2stl.py'],
-    pathex=pathex,  # Important: Includes Conda Library/bin
+    pathex=pathex,
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    hookspath=['./hooks'], # Points to your hook-OCC.py
+    hookspath=['./hooks'],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'PyQt5', 'PyQt6', 'matplotlib', 'scipy', 'pytest', 'IPython'],
+    excludes=['tkinter', 'PyQt5', 'PyQt6', 'matplotlib', 'scipy', 'pytest', 'IPython', 'numpy.f2py.tests'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
 )
 
-# Clean up duplicates
-a.binaries = list(set(a.binaries))
-a.hiddenimports = list(set(a.hiddenimports))
-
-# Remove pkg_resources hook if present (often causes issues)
+# Remove pkg_resources hook if present
 a.scripts = [s for s in a.scripts if 'pyi_rth_pkgres' not in s[1]]
-
-# Filter out trash binaries
-def is_garbage(name):
-    name = name.lower()
-    return 'test' in name or 'example' in name
-
-a.binaries = [x for x in a.binaries if not is_garbage(x[0])]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
@@ -165,7 +184,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False, # Disable UPX to prevent DLL corruption
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,

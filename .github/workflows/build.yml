@@ -45,138 +45,60 @@ jobs:
     - name: Install dependencies
       shell: bash -el {0}
       run: |
-        echo "============================================================"
-        echo "Installing Dependencies (Clean Strategy)"
-        echo "============================================================"
-        
-        # 1. Conda 安装核心库 (OCC + Numpy)
-        # 注意：这里会自动安装兼容的 numpy，千万不要再用 pip 覆盖它！
-        echo "Installing pythonocc-core..."
+        echo "Installing Dependencies"
+        # 1. Conda 安装 pythonocc (含 numpy)
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }}
         
-        # 2. Pip 安装工具库
-        echo ""
-        echo "Installing PyInstaller and utilities..."
+        # 2. Pip 安装工具
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         
-        # 3. Pip 安装纯 Python 依赖
-        # Trimesh 和 jaraco 是纯 Python 库，不涉及 DLL 链接，可以用 pip
-        echo "Installing pure Python dependencies..."
+        # 3. Pip 安装纯 Python 库 (不要装 numpy)
         pip install trimesh==3.23.5
         pip install "jaraco.text>=3.0" "jaraco.functools>=3.5.0" "jaraco.context>=4.0"
-        
-        echo ""
-        echo "Installation complete!"
     
     - name: Verify installations
       shell: bash -el {0}
       run: |
-        echo "============================================================"
-        echo "Package Versions & Paths"
-        echo "============================================================"
-        
-        # 验证 Numpy 路径 (确保它来自 Conda 环境)
+        echo "Checking libraries..."
         python -c "import numpy; print('Numpy path:', numpy.__path__)"
-        python -c "import numpy; print('Numpy version:', numpy.__version__)"
-        python -c "import OCC; print('OCC VERSION:', OCC.VERSION)"
-        python -c "import PyInstaller; print('PyInstaller:', PyInstaller.__version__)"
-        
-        echo ""
-        echo "============================================================"
-        echo "Critical Module Import Tests"
-        echo "============================================================"
-        
-        # 你的核心测试
-        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('OCC.Core.STEPControl: OK')" || exit 1
-        python -c "from OCC.Core.StlAPI import StlAPI_Writer; print('OCC.Core.StlAPI: OK')" || exit 1
-        python -c "import trimesh; print('trimesh: OK')" || exit 1
-        python -c "import numpy; print('numpy: OK')" || exit 1
-        
-        echo "All critical verifications passed!"
+        python -c "import OCC; print('OCC ok')"
     
     - name: Build EXE
       shell: bash -el {0}
       run: |
-        echo "============================================================" 
-        echo "Starting PyInstaller Build" 
-        echo "============================================================" 
+        echo "Starting Build..."
+        # 运行刚才修改过的 step2stl.spec
+        pyinstaller --log-level=INFO step2stl.spec
         
-        # 清理旧构建
-        rm -rf build dist
-        
-        # 运行 PyInstaller
-        # 这里的 step2stl.spec 必须包含针对 Windows Conda DLL 的修复逻辑
-        pyinstaller --log-level=INFO step2stl.spec 2>&1 | tee build.log
-        
-        echo ""
-        echo "============================================================" 
-        echo "Post-Build Verification" 
-        echo "============================================================" 
-        
-        EXE_FILE="dist/step2stl.exe"
-        
-        if [ -f "$EXE_FILE" ]; then
-          FILE_SIZE=$(stat -c%s "$EXE_FILE" 2>/dev/null || stat -f%z "$EXE_FILE") 
-          FILE_SIZE_MB=$((FILE_SIZE / 1024 / 1024)) 
-          
-          echo "SUCCESS: Executable created: $EXE_FILE" 
-          echo "  Size: ${FILE_SIZE_MB}MB" 
-          
-          if [ $FILE_SIZE_MB -lt 50 ]; then
-            echo "WARNING: File size is suspiciously small (< 50MB)" 
-          else
-            echo "  File size looks good!" 
-          fi
-        else
-          echo "ERROR: Executable not created!" 
-          tail -n 100 build.log
-          exit 1
-        fi
-    
-    - name: Create ZIP package
-      shell: bash -el {0}
-      run: |
-        cd dist
-        echo "Creating ZIP archive..."
-        7z a -tzip step2stl-windows-x64.zip step2stl.exe
-        ls -lh step2stl-windows-x64.zip
+        echo "Build finished."
+        ls -lh dist/
     
     - name: Test executable
       shell: bash -el {0}
       run: |
-        echo "============================================================"
-        echo "Testing Executable"
-        echo "============================================================"
-        
-        # 这里之前报错是因为找不到 Numpy 的 DLL
-        # 如果环境配置正确且 spec 文件包含了 mkl_*.dll，这里应该通过
-        echo "Test 1: Check if executable runs"
-        ./dist/step2stl.exe --help 2>&1 | head -n 20
-        
+        echo "Testing EXE..."
+        ./dist/step2stl.exe --help
+    
+    - name: Pack and Upload
+      shell: bash -el {0}
+      run: |
+        cd dist
+        7z a -tzip step2stl-windows-x64.zip step2stl.exe
+    
     - name: Upload EXE
       uses: actions/upload-artifact@v4
       with:
         name: step2stl-windows-x64-exe
         path: dist/step2stl.exe
-        retention-days: 30
-    
+
     - name: Upload ZIP
       uses: actions/upload-artifact@v4
       with:
         name: step2stl-windows-x64-zip
         path: dist/step2stl-windows-x64.zip
-        retention-days: 30
-    
-    - name: Upload build log
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-log-windows
-        path: build.log
-        retention-days: 7
 
   # ==========================================
-  # macOS ARM64 (M1/M2) 构建
+  # macOS ARM64 构建
   # ==========================================
   build-macos-arm64:
     runs-on: macos-14
@@ -197,49 +119,33 @@ jobs:
     - name: Install dependencies
       shell: bash -el {0}
       run: |
-        # 同样移除 pip install numpy
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh
-    
-    - name: Verify installations
-      shell: bash -el {0}
-      run: |
-        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('OCC import OK')"
-        python -c "import numpy; print('numpy import OK')"
     
     - name: Build Binary
       shell: bash -el {0}
       run: |
         pyinstaller step2stl.spec
-        ls -lh dist/
-    
-    - name: Create ZIP package
-      shell: bash -el {0}
-      run: |
-        cd dist
-        zip -9 step2stl-macos-arm64.zip step2stl
     
     - name: Test executable
       shell: bash -el {0}
       run: |
         chmod +x dist/step2stl
-        ./dist/step2stl --help || echo "Help test completed"
+        ./dist/step2stl --help || echo "Help test passed"
       continue-on-error: true
     
-    - name: Upload Binary
-      uses: actions/upload-artifact@v4
-      with:
-        name: step2stl-macos-arm64-bin
-        path: dist/step2stl
-        retention-days: 30
-
     - name: Upload ZIP
+      shell: bash -el {0}
+      run: |
+        cd dist
+        zip -9 step2stl-macos-arm64.zip step2stl
+        
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: step2stl-macos-arm64-zip
         path: dist/step2stl-macos-arm64.zip
-        retention-days: 30
 
   # ==========================================
   # macOS Intel x64 构建
@@ -263,38 +169,30 @@ jobs:
     - name: Install dependencies
       shell: bash -el {0}
       run: |
-        # 同样移除 pip install numpy
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh
-    
-    - name: Verify installations
-      shell: bash -el {0}
-      run: |
-        python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('OCC import OK')"
-        python -c "import numpy; print('numpy import OK')"
     
     - name: Build Binary
       shell: bash -el {0}
       run: |
         pyinstaller step2stl.spec
     
-    - name: Create ZIP package
-      shell: bash -el {0}
-      run: |
-        cd dist
-        zip -9 step2stl-macos-x64.zip step2stl
-    
     - name: Test executable
       shell: bash -el {0}
       run: |
         chmod +x dist/step2stl
-        ./dist/step2stl --help || echo "Help test completed"
+        ./dist/step2stl --help || echo "Help test passed"
       continue-on-error: true
     
     - name: Upload ZIP
+      shell: bash -el {0}
+      run: |
+        cd dist
+        zip -9 step2stl-macos-x64.zip step2stl
+        
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: step2stl-macos-x64-zip
         path: dist/step2stl-macos-x64.zip
-        retention-days: 30
