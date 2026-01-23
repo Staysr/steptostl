@@ -21,7 +21,7 @@ env:
 
 jobs:
   # ==========================================
-  # Windows x64 构建 (Folder Mode)
+  # Windows x64 构建
   # ==========================================
   build-windows-x64:
     runs-on: windows-2019
@@ -54,18 +54,23 @@ jobs:
     - name: Create Runtime Hooks
       shell: bash -el {0}
       run: |
-        # Win7 路径修复
+        # Win7 PATH 修复钩子
         cat > rthook_win7.py <<EOF
         import os
         import sys
         try:
-            base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
+            # 获取 EXE 所在目录
+            if getattr(sys, 'frozen', False):
+                base_path = os.path.dirname(sys.executable)
+            else:
+                base_path = os.path.dirname(os.path.abspath(__file__))
+            # 强行添加到 PATH
             os.environ['PATH'] = base_path + ';' + os.environ.get('PATH', '')
         except Exception:
             pass
         EOF
         
-        # 编码修复
+        # 中文编码修复钩子
         cat > rthook_encoding.py <<EOF
         import sys
         import io
@@ -81,28 +86,24 @@ jobs:
     - name: Build EXE (OneDir)
       shell: bash -el {0}
       run: |
-        echo "Starting Build..."
         pyinstaller --log-level=INFO step2stl.spec
-        
-        echo "Build Complete. Checking dist folder:"
-        ls -lh dist/step2stl/
+        ls -lh dist/
     
     - name: Test executable
       shell: bash -el {0}
       env:
         PYTHONUTF8: 1
       run: |
-        # 注意路径变了，现在是在文件夹里
+        # 因为是单目录模式，exe 在子文件夹里
         ./dist/step2stl/step2stl.exe --help
     
     - name: Pack and Upload
       shell: bash -el {0}
       run: |
         cd dist
-        # 将整个文件夹压缩
+        # 压缩整个文件夹
         7z a -tzip step2stl-windows-x64.zip step2stl/
     
-    # 只需要上传 ZIP，文件夹里的散文件不用上传了
     - name: Upload ZIP
       uses: actions/upload-artifact@v4
       with:
@@ -110,7 +111,7 @@ jobs:
         path: dist/step2stl-windows-x64.zip
 
   # ==========================================
-  # macOS ARM64 构建 (保持不变)
+  # macOS ARM64 构建
   # ==========================================
   build-macos-arm64:
     runs-on: macos-14
@@ -136,8 +137,6 @@ jobs:
       run: |
         touch rthook_encoding.py
         touch rthook_win7.py
-    # 注意：Mac 依然使用原来的逻辑，因为 Mac 不受 Spec 的 OneDir 影响（除非我们特意改 spec，但上面的 spec 是通用的，只是在 Mac 上我们依然可以生成 OneFile，或者统一变成 OneDir）
-    # 这里的 Spec 在 Mac 上也会生成 OneDir。为了简单起见，我们让 Mac 也生成文件夹模式，这样更稳定。
     - name: Build Binary
       shell: bash -el {0}
       run: pyinstaller step2stl.spec
@@ -159,7 +158,7 @@ jobs:
         path: dist/step2stl-macos-arm64.zip
 
   # ==========================================
-  # macOS Intel x64 构建 (保持不变，调整为 Folder)
+  # macOS Intel x64 构建
   # ==========================================
   build-macos-x64:
     runs-on: macos-13
