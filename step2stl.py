@@ -30,8 +30,9 @@ try:
     from OCC.Core.IFSelect import IFSelect_RetDone
     from OCC.Core.Bnd import Bnd_Box
     from OCC.Core.BRepBndLib import brepbndlib_Add
-except ImportError: 
+except ImportError:
     print("❌ 错误: 未安装 pythonocc-core", file=sys.stderr) 
+    print(f"原因: {e}", file=sys.stderr)
     print("请运行: pip install pythonocc-core", file=sys.stderr) 
     sys.exit(EXIT_ERROR_IMPORT) 
 

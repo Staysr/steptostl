@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-step2stl PyInstaller Build Configuration (Win7 Ultimate Fix)
+step2stl PyInstaller Build Configuration (Nuclear Option for Win7)
 """
 
 import sys
@@ -35,7 +35,7 @@ def sanitize_tuples(raw_list):
     return list(set(clean))
 
 _safe_print("=" * 70)
-_safe_print("step2stl Build Config (Win7 Ultimate Mode)")
+_safe_print("step2stl Build Config (Nuclear Option)")
 _safe_print("=" * 70)
 
 # ==========================================
@@ -49,6 +49,8 @@ if not conda_prefix:
     except:
         pass
 
+_safe_print(f"Conda Prefix: {conda_prefix}")
+
 # ==========================================
 # 3. Init
 # ==========================================
@@ -58,55 +60,42 @@ binaries = []
 pathex = []
 
 # ==========================================
-# 4. Windows 7 DLL Injection (CRITICAL)
+# 4. DLL Collection (The Nuclear Approach)
 # ==========================================
 if sys.platform == 'win32' and conda_prefix:
     lib_bin = os.path.join(conda_prefix, 'Library', 'bin')
-    conda_bin = os.path.join(conda_prefix, 'bin') # Sometimes DLLs are here
     
-    # Add search paths
-    if os.path.exists(lib_bin): pathex.append(lib_bin)
-    if os.path.exists(conda_bin): pathex.append(conda_bin)
-
-    _safe_print("\n[Windows 7 Hardcore Fix]")
-    
-    # 4.1. Standard Dependencies (OCC/Numpy/MKL)
-    dll_patterns = [
-        'mkl_*.dll', 'libopenblas*.dll', 'libiomp5md.dll', # Numpy
-        'tbb*.dll', 'freeimage*.dll', 'freetype*.dll',     # OCC
-        'zlib*.dll', 'lzma*.dll',                          # Compression
-        'sqlite3.dll'
-    ]
-    
-    # 4.2. UCRT & System API DLLs (The Win7 Fix)
-    # 强行打包 UCRT 和 api-ms-win-* 使得程序自带运行环境
-    win7_patterns = [
-        'ucrtbase.dll',
-        'api-ms-win-*.dll',
-        'vcruntime*.dll',
-        'msvcp*.dll',
-        'concrt*.dll'
-    ]
-    
-    all_patterns = dll_patterns + win7_patterns
-    
-    count = 0
-    # Search in both Library/bin and bin (sometimes location varies)
-    for search_dir in [lib_bin, conda_bin]:
-        if not os.path.exists(search_dir): continue
+    if os.path.exists(lib_bin):
+        pathex.append(lib_bin)
+        _safe_print("\n[DLL Injection: Nuclear Mode]")
+        _safe_print("Copying ALL DLLs from Library/bin to ensure Win7 compatibility...")
         
-        for pattern in all_patterns:
-            found = glob.glob(os.path.join(search_dir, pattern))
-            for dll in found:
-                # Pack them next to the executable
-                binaries.append((dll, '.'))
-                count += 1
+        # 暴力获取所有 DLL，不再筛选
+        all_dlls = glob.glob(os.path.join(lib_bin, '*.dll'))
+        
+        count = 0
+        for dll_path in all_dlls:
+            dll_name = os.path.basename(dll_path).lower()
+            
+            # 排除 python 自身的 dll，防止冲突 (由 PyInstaller 处理)
+            if dll_name.startswith('python3') or dll_name == 'python.dll':
+                continue
                 
-    _safe_print(f"  Injected {count} DLLs (including UCRT/API-MS) for Win7 compatibility")
+            # 排除一些典型的系统级驱动，避免权限问题
+            if dll_name in ['opengl32.dll', 'glu32.dll', 'd3d9.dll', 'kernel32.dll']:
+                continue
+
+            binaries.append((dll_path, '.'))
+            count += 1
+            
+        _safe_print(f"  Brute-force injected {count} DLLs.")
+    else:
+        _safe_print("Warning: Library/bin not found!")
 
 # ==========================================
 # 5. Collect Python Dependencies
 # ==========================================
+# Numpy
 try:
     np_hidden, np_bin, np_data = collect_all('numpy')
     if np_hidden: hiddenimports.extend(np_hidden)
@@ -115,6 +104,7 @@ try:
 except:
     hiddenimports.extend(['numpy', 'numpy.core', 'numpy._core'])
 
+# Jaraco
 try:
     j_hidden, j_bin, j_data = collect_all('jaraco')
     if j_hidden: hiddenimports.extend(j_hidden)
@@ -122,22 +112,27 @@ try:
 except:
     hiddenimports.extend(['jaraco.text', 'jaraco.functools', 'jaraco.context'])
 
+# Trimesh
 try:
     tm_hidden = collect_submodules('trimesh')
     if tm_hidden: hiddenimports.extend(tm_hidden)
 except:
     hiddenimports.append('trimesh')
 
-hiddenimports.extend([
-    'ipaddress', 'urllib', 'urllib.parse', 'pathlib', 'argparse',
-    'collections', 'collections.abc', 'warnings', 'traceback',
-    'shutil', 'tempfile', 'copy', 'zipfile', 'ctypes'
-])
-
+# OCC
 hiddenimports.extend([
     'OCC', 'OCC.Core',
     'OCC.Core.STEPControl', 'OCC.Core.StlAPI', 'OCC.Core.BRepMesh',
     'OCC.Core.IFSelect', 'OCC.Core.Bnd', 'OCC.Core.BRepBndLib',
+    'OCC.Core.TCollection', 'OCC.Core.TColStd', 'OCC.Core.Standard', # 增加一些基础模块
+    'OCC.Core.TopoDS', 'OCC.Core.TopExp'
+])
+
+# Misc
+hiddenimports.extend([
+    'ipaddress', 'urllib', 'urllib.parse', 'pathlib', 'argparse',
+    'collections', 'collections.abc', 'warnings', 'traceback',
+    'shutil', 'tempfile', 'copy', 'zipfile', 'ctypes', 'typing'
 ])
 
 # ==========================================
@@ -155,7 +150,7 @@ block_cipher = None
 a = Analysis(
     ['step2stl.py'],
     pathex=pathex,
-    binaries=binaries,
+    binaries=binaries, # 包含了所有的 Library/bin DLL
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=['./hooks'],
@@ -183,7 +178,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,
+    upx=False, # 坚决关闭 UPX，Win7 对压缩壳很敏感
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
