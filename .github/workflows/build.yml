@@ -45,10 +45,17 @@ jobs:
     - name: Install dependencies
       shell: bash -el {0}
       run: |
-        conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }}
+        echo "Installing Dependencies"
+
+        echo "Installing pythonocc-core with numpy < 2.0..."
+        conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }} "numpy<2.0" libpython
+        echo "Installing PyInstaller..."
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
+        echo "Installing trimesh and utilities..."
         pip install trimesh==3.23.5
         pip install "jaraco.text>=3.0" "jaraco.functools>=3.5.0" "jaraco.context>=4.0"
+        echo "Verifying Numpy version..."
+        python -c "import numpy; print(f'Numpy Version: {numpy.__version__}'); assert int(numpy.__version__.split('.')[0]) < 2"
     
     # [新增步骤] 创建编码修复钩子
     # 这个文件会被 PyInstaller 打包进 exe，启动时自动运行，强制 UTF-8 输出
