@@ -1,12 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-step2stl PyInstaller Build Configuration - Optimized for Windows Conda
+step2stl PyInstaller Build Configuration (Fixed for Windows/Conda)
 """
 
 import sys
 import os
 import glob
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 # ==========================================
 # Safe print function
@@ -18,144 +18,160 @@ def _safe_print(msg):
         pass
 
 _safe_print("=" * 70)
-_safe_print("step2stl Build Configuration (Refactored)")
+_safe_print("step2stl Build Configuration (Refined)")
 _safe_print("=" * 70)
 
 # ==========================================
-# Helper: Collect Conda DLLs (The Fix)
+# Helper: Detect Conda
 # ==========================================
-def get_conda_dlls():
-    """
-    专门解决 Windows 下 "ImportError: DLL load failed" 问题
-    直接从 Conda Library/bin 目录收集核心 DLL
-    """
-    binaries =
-    # 仅在 Windows 下执行此逻辑
-    if sys.platform!= 'win32':
-        return binaries
+conda_prefix = os.environ.get('CONDA_PREFIX')
+if not conda_prefix:
+    # Try to guess from executable path
+    try:
+        if 'conda' in sys.executable.lower():
+            conda_prefix = os.path.dirname(os.path.dirname(sys.executable))
+    except:
+        pass
 
-    conda_prefix = os.environ.get('CONDA_PREFIX')
-    if not conda_prefix:
-        _safe_print("WARNING: CONDA_PREFIX not set. DLL collection may fail.")
-        return binaries
-
-    # Conda 的 DLL 仓库
-    dll_dir = os.path.join(conda_prefix, 'Library', 'bin')
-    if not os.path.exists(dll_dir):
-        _safe_print(f"WARNING: Library/bin not found at {dll_dir}")
-        return binaries
-
-    _safe_print(f"Collecting DLLs from: {dll_dir}")
-    
-    # 关键：手动收集这些数学库和运行时库
-    # MKL (Intel Math Kernel Library)
-    # OpenBLAS (如果 numpy 是 conda-forge 版)
-    # TBB (OpenCASCADE 依赖)
-    patterns = [
-        'mkl_*.dll', 
-        'libopenblas*.dll', 
-        'tbb*.dll', 
-        'vcruntime*.dll',
-        'msvcp*.dll',
-        'freetype*.dll'
-    ]
-    
-    count = 0
-    for pattern in patterns:
-        search_path = os.path.join(dll_dir, pattern)
-        for dll_file in glob.glob(search_path):
-            # 格式: (源文件路径, 目标文件夹)
-            # '.' 表示放在 exe 同级目录，这是 Windows 加载 DLL 的第一搜索位
-            binaries.append((dll_file, '.'))
-            count += 1
-            
-    _safe_print(f"  Collected {count} critical DLLs manually")
-    return binaries
+_safe_print("CONDA_PREFIX: %s" % conda_prefix)
+_safe_print("Platform: %s" % sys.platform)
 
 # ==========================================
 # Initialize
 # ==========================================
-hiddenimports =
-datas =
-binaries =
+hiddenimports = []
+datas = []
+binaries = []
+pathex = []
 
 # ==========================================
-# 1. NumPy (Standard Hook + Hidden Imports)
+# Windows Conda DLL Fix (Crucial for Numpy/OCC)
 # ==========================================
-# 注意：我们不再使用 collect_all('numpy')，因为它会漏掉 Conda 的 DLL
-# 我们改用 PyInstaller 内置 hook + 手动 hiddenimports
-hiddenimports += ['numpy', 'numpy.core', 'numpy.lib', 'numpy.linalg', 'numpy.random']
+if sys.platform == 'win32' and conda_prefix:
+    _safe_print("\n[Windows Conda Fix]")
+    # 1. Add Library/bin to pathex so PyInstaller can find DLLs during analysis
+    lib_bin = os.path.join(conda_prefix, 'Library', 'bin')
+    if os.path.exists(lib_bin):
+        _safe_print("  Adding to pathex: %s" % lib_bin)
+        pathex.append(lib_bin)
+        
+        # 2. Manually collect critical DLLs that hooks often miss
+        # Numpy often needs MKL or OpenBLAS, OCC needs TBB/FreeImage
+        dll_patterns = [
+            'mkl_*.dll', 'libopenblas*.dll', 'libiomp5md.dll', # Numpy/BLAS
+            'tbb*.dll', 'freeimage*.dll', 'freetype*.dll',     # OCC Deps
+            'zlib*.dll', 'lzma*.dll'                           # Compression
+        ]
+        
+        count = 0
+        for pattern in dll_patterns:
+            for dll in glob.glob(os.path.join(lib_bin, pattern)):
+                # (source, destination_folder)
+                binaries.append((dll, '.'))
+                count += 1
+        _safe_print("  Manually added %d critical DLLs from Library/bin" % count)
 
 # ==========================================
-# 2. Jaraco & Standard Libs
+# Collect Packages
 # ==========================================
-datas += collect_data_files('jaraco')
-hiddenimports += collect_submodules('jaraco')
-hiddenimports += [
-    'ipaddress', 'urllib', 'urllib.parse', 'pathlib', 'argparse',
-    'collections', 'collections.abc', 'warnings', 'traceback',
-]
 
-# ==========================================
-# 3. OCC Modules
-# ==========================================
-hiddenimports += ['OCC', 'OCC.Core']
+# 1. Numpy
+_safe_print("\n[Collecting numpy]")
 try:
-    # 收集 OCC 所有子模块
-    occ_all = collect_submodules('OCC.Core')
-    hiddenimports += occ_all
+    # collect_all finds the package, but sometimes misses external DLLs handled above
+    np_hidden, np_bin, np_data = collect_all('numpy')
+    hiddenimports += np_hidden
+    binaries += np_bin
+    datas += np_data
+except Exception as e:
+    _safe_print("  Warning: %s" % e)
+    hiddenimports += ['numpy', 'numpy.core', 'numpy._core']
+
+# 2. Jaraco (Dependency hell often lives here)
+_safe_print("\n[Collecting jaraco]")
+try:
+    j_hidden, j_bin, j_data = collect_all('jaraco')
+    hiddenimports += j_hidden
+    datas += j_data
 except:
-    pass
+    hiddenimports += ['jaraco.text', 'jaraco.functools', 'jaraco.context']
 
-# ==========================================
-# 4. Trimesh
-# ==========================================
+# 3. Trimesh
+_safe_print("\n[Collecting trimesh]")
 try:
-    hiddenimports += collect_submodules('trimesh')
+    tm_hidden = collect_submodules('trimesh')
+    hiddenimports += tm_hidden
 except:
     hiddenimports += ['trimesh']
 
-# ==========================================
-# 5. Inject Conda DLLs (核心修复步骤)
-# ==========================================
-# 将手动收集的 DLL 加入构建列表
-binaries += get_conda_dlls()
+# 4. Standard Library & Misc
+hiddenimports += [
+    'ipaddress', 'urllib', 'urllib.parse', 'pathlib', 'argparse',
+    'collections', 'collections.abc', 'warnings', 'traceback',
+    'shutil', 'tempfile', 'copy', 'zipfile'
+]
+
+# 5. OCC (Core logic handled by hook-OCC.py, but adding safety here)
+hiddenimports += [
+    'OCC', 'OCC.Core',
+    'OCC.Core.STEPControl', 'OCC.Core.StlAPI', 'OCC.Core.BRepMesh',
+    'OCC.Core.IFSelect', 'OCC.Core.Bnd', 'OCC.Core.BRepBndLib',
+]
 
 # ==========================================
-# Analysis & Build
+# Analysis
 # ==========================================
-excludes = [
-    'tkinter', 'PyQt5', 'PyQt6', 'matplotlib',
-    'pandas', 'scipy', 'pytest', 'IPython', 'PIL'
-]
+block_cipher = None
 
 a = Analysis(
     ['step2stl.py'],
-    pathex=,
+    pathex=pathex,  # Important: Includes Conda Library/bin
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    hookspath=['./hooks'],
+    hookspath=['./hooks'], # Points to your hook-OCC.py
     hooksconfig={},
-    runtime_hooks=,
-    excludes=excludes,
+    runtime_hooks=[],
+    excludes=['tkinter', 'PyQt5', 'PyQt6', 'matplotlib', 'scipy', 'pytest', 'IPython'],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
     noarchive=False,
 )
 
-# 移除 pkg_resources hook (常引起路径错误)
-a.scripts = [s for s in a.scripts if 'pyi_rth_pkgres' not in s]
+# Clean up duplicates
+a.binaries = list(set(a.binaries))
+a.hiddenimports = list(set(a.hiddenimports))
 
-pyz = PYZ(a.pure)
+# Remove pkg_resources hook if present (often causes issues)
+a.scripts = [s for s in a.scripts if 'pyi_rth_pkgres' not in s[1]]
+
+# Filter out trash binaries
+def is_garbage(name):
+    name = name.lower()
+    return 'test' in name or 'example' in name
+
+a.binaries = [x for x in a.binaries if not is_garbage(x[0])]
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
     a.datas,
-   ,
+    [],
     name='step2stl',
     debug=False,
+    bootloader_ignore_signals=False,
     strip=False,
-    upx=False,
+    upx=False, # Disable UPX to prevent DLL corruption
+    upx_exclude=[],
+    runtime_tmpdir=None,
     console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
 )

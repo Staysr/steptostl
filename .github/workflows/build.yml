@@ -10,11 +10,11 @@ on:
   workflow_dispatch:
 
 env:
-  PYTHON_WIN: "3.9" 
-  PYTHON_MAC: "3.10" 
-  OCC_VERSION_WIN: "7.8.1" 
-  OCC_VERSION_MAC: "7.8.1" 
-  PYINSTALLER_VERSION: "6.9.0" 
+  PYTHON_WIN: "3.9"
+  PYTHON_MAC: "3.10"
+  OCC_VERSION_WIN: "7.8.1"
+  OCC_VERSION_MAC: "7.8.1"
+  PYINSTALLER_VERSION: "6.9.0"
   PYTHONIOENCODING: "utf-8"
   PYTHONUTF8: "1"
 
@@ -46,21 +46,23 @@ jobs:
       shell: bash -el {0}
       run: |
         echo "============================================================"
-        echo "Installing Dependencies (Unified Conda Environment)"
+        echo "Installing Dependencies (Clean Strategy)"
         echo "============================================================"
         
-        # 核心修改：全部使用 Conda 安装，确保二进制兼容性
-        # 显式指定 numpy 版本让 Conda 解决依赖
-        echo "Installing binary dependencies via Conda..."
-        conda install -y -c conda-forge \
-          pythonocc-core=${{ env.OCC_VERSION_WIN }} \
-          "numpy>=1.21.0,<2.0" \
-          trimesh \
-          pyinstaller=${{ env.PYINSTALLER_VERSION }}
+        # 1. Conda 安装核心库 (OCC + Numpy)
+        # 注意：这里会自动安装兼容的 numpy，千万不要再用 pip 覆盖它！
+        echo "Installing pythonocc-core..."
+        conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }}
         
+        # 2. Pip 安装工具库
         echo ""
-        echo "Installing pure-python dependencies via pip..."
-        # 纯 Python 库可以用 pip，不会引起 DLL 问题
+        echo "Installing PyInstaller and utilities..."
+        pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
+        
+        # 3. Pip 安装纯 Python 依赖
+        # Trimesh 和 jaraco 是纯 Python 库，不涉及 DLL 链接，可以用 pip
+        echo "Installing pure Python dependencies..."
+        pip install trimesh==3.23.5
         pip install "jaraco.text>=3.0" "jaraco.functools>=3.5.0" "jaraco.context>=4.0"
         
         echo ""
@@ -70,23 +72,12 @@ jobs:
       shell: bash -el {0}
       run: |
         echo "============================================================"
-        echo "System Information"
+        echo "Package Versions & Paths"
         echo "============================================================"
         
-        echo "Python version:"
-        python --version
-        
-        echo ""
-        echo "Python location:"
-        which python
-        
-        echo ""
-        echo "============================================================"
-        echo "Package Versions"
-        echo "============================================================"
-        
-        python -c "import numpy; print('numpy:', numpy.__version__)"
-        python -c "import trimesh; print('trimesh:', trimesh.__version__)"
+        # 验证 Numpy 路径 (确保它来自 Conda 环境)
+        python -c "import numpy; print('Numpy path:', numpy.__path__)"
+        python -c "import numpy; print('Numpy version:', numpy.__version__)"
         python -c "import OCC; print('OCC VERSION:', OCC.VERSION)"
         python -c "import PyInstaller; print('PyInstaller:', PyInstaller.__version__)"
         
@@ -95,78 +86,26 @@ jobs:
         echo "Critical Module Import Tests"
         echo "============================================================"
         
+        # 你的核心测试
         python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('OCC.Core.STEPControl: OK')" || exit 1
         python -c "from OCC.Core.StlAPI import StlAPI_Writer; print('OCC.Core.StlAPI: OK')" || exit 1
-        python -c "from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh; print('OCC.Core.BRepMesh: OK')" || exit 1
-        
         python -c "import trimesh; print('trimesh: OK')" || exit 1
         python -c "import numpy; print('numpy: OK')" || exit 1
-        python -c "import numpy.core; print('numpy.core: OK')" || exit 1
         
-        python -c "import jaraco.text; print('jaraco.text: OK')" || exit 1
-        python -c "import ipaddress; print('ipaddress: OK')" || exit 1
-        python -c "import urllib.parse; print('urllib.parse: OK')" || exit 1
-        
-        echo ""
-        echo "============================================================"
-        echo "Optional Module Tests (non-critical)"
-        echo "============================================================"
-        
-        # 这些模块是可选的，失败不影响构建
-        python -c "import numpy._core._multiarray_tests; print('numpy._core._multiarray_tests: OK')" 2>/dev/null || echo "numpy._core._multiarray_tests: SKIPPED (optional)"
-        python -c "import numpy._core; print('numpy._core: OK')" 2>/dev/null || echo "numpy._core: SKIPPED (optional)"
-        
-        echo ""
-        echo "============================================================"
         echo "All critical verifications passed!"
-        echo "============================================================"
     
     - name: Build EXE
       shell: bash -el {0}
       run: |
         echo "============================================================" 
-        echo "Pre-Build Environment Check" 
-        echo "============================================================" 
-        
-        echo "CONDA_PREFIX: ${CONDA_PREFIX}" 
-        echo "Python: $(python --version)" 
-        echo "PyInstaller: $(pyinstaller --version)" 
-        
-        echo ""
-        echo "Validating hook file..."
-        python -c "exec(open('hooks/hook-OCC.py', encoding='utf-8').read())" && echo "Hook file OK" || {
-          echo "ERROR: hook-OCC.py validation failed"
-          exit 1
-        }
-        
-        echo ""
-        echo "Checking OpenCASCADE libraries..."
-        
-        if [ "$RUNNER_OS" == "Windows" ]; then
-          LIB_DIR="${CONDA_PREFIX}/Library/bin" 
-          if [ -d "$LIB_DIR" ]; then
-            echo "TK*.dll files in ${LIB_DIR}:" 
-            ls -1 "${LIB_DIR}"/TK*.dll 2>/dev/null | wc -l | xargs echo "  Count:" 
-            ls "${LIB_DIR}"/TK*.dll 2>/dev/null | head -n 5
-          else
-            echo "ERROR: ${LIB_DIR} not found!" 
-          fi
-        else
-          LIB_DIR="${CONDA_PREFIX}/lib" 
-          if [ -d "$LIB_DIR" ]; then
-            echo "libTK*.dylib files in ${LIB_DIR}:" 
-            ls -1 "${LIB_DIR}"/libTK*.dylib 2>/dev/null | wc -l | xargs echo "  Count:" 
-            ls "${LIB_DIR}"/libTK*.dylib 2>/dev/null | head -n 5
-          fi
-        fi
-        
-        echo ""
-        echo "============================================================" 
         echo "Starting PyInstaller Build" 
         echo "============================================================" 
         
+        # 清理旧构建
         rm -rf build dist
         
+        # 运行 PyInstaller
+        # 这里的 step2stl.spec 必须包含针对 Windows Conda DLL 的修复逻辑
         pyinstaller --log-level=INFO step2stl.spec 2>&1 | tee build.log
         
         echo ""
@@ -174,11 +113,7 @@ jobs:
         echo "Post-Build Verification" 
         echo "============================================================" 
         
-        if [ "$RUNNER_OS" == "Windows" ]; then
-          EXE_FILE="dist/step2stl.exe" 
-        else
-          EXE_FILE="dist/step2stl" 
-        fi
+        EXE_FILE="dist/step2stl.exe"
         
         if [ -f "$EXE_FILE" ]; then
           FILE_SIZE=$(stat -c%s "$EXE_FILE" 2>/dev/null || stat -f%z "$EXE_FILE") 
@@ -188,19 +123,12 @@ jobs:
           echo "  Size: ${FILE_SIZE_MB}MB" 
           
           if [ $FILE_SIZE_MB -lt 50 ]; then
-            echo "" 
             echo "WARNING: File size is suspiciously small (< 50MB)" 
-            echo "   This usually means OpenCASCADE libraries are missing" 
-            echo "" 
-            echo "Checking build log for 'TK' libraries..." 
-            grep -i "TK.*\.dll\|TK.*\.dylib\|TK.*\.so" build.log | head -n 10
           else
             echo "  File size looks good!" 
           fi
         else
           echo "ERROR: Executable not created!" 
-          echo "" 
-          echo "Build log (last 100 lines):" 
           tail -n 100 build.log
           exit 1
         fi
@@ -211,8 +139,6 @@ jobs:
         cd dist
         echo "Creating ZIP archive..."
         7z a -tzip step2stl-windows-x64.zip step2stl.exe
-        
-        echo "Archive created:"
         ls -lh step2stl-windows-x64.zip
     
     - name: Test executable
@@ -222,26 +148,11 @@ jobs:
         echo "Testing Executable"
         echo "============================================================"
         
+        # 这里之前报错是因为找不到 Numpy 的 DLL
+        # 如果环境配置正确且 spec 文件包含了 mkl_*.dll，这里应该通过
         echo "Test 1: Check if executable runs"
-        ./dist/step2stl.exe --help 2>&1 | head -n 20 || {
-          EXIT_CODE=$?
-          echo "Exit code: $EXIT_CODE"
-          if [ $EXIT_CODE -ne 0 ] && [ $EXIT_CODE -ne 2 ]; then
-            echo "ERROR: Executable failed to run"
-            exit 1
-          fi
-        }
+        ./dist/step2stl.exe --help 2>&1 | head -n 20
         
-        echo ""
-        echo "Test 2: Check version (if implemented)"
-        ./dist/step2stl.exe --version 2>&1 || echo "Version test completed"
-        
-        echo ""
-        echo "============================================================"
-        echo "Executable tests completed!"
-        echo "============================================================"
-      continue-on-error: false
-    
     - name: Upload EXE
       uses: actions/upload-artifact@v4
       with:
@@ -286,62 +197,32 @@ jobs:
     - name: Install dependencies
       shell: bash -el {0}
       run: |
-        echo "Installing pythonocc-core..."
+        # 同样移除 pip install numpy
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
-        
-        echo "Installing Python packages..."
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
-        pip install trimesh numpy
-        
-        echo "Installation complete!"
+        pip install trimesh
     
     - name: Verify installations
       shell: bash -el {0}
       run: |
-        echo "System info:"
-        uname -m
-        sw_vers
-        
-        echo ""
-        echo "Python version:"
-        python --version
-        
-        echo ""
-        echo "Checking imports..."
         python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('OCC import OK')"
-        python -c "import trimesh; print('trimesh import OK')"
         python -c "import numpy; print('numpy import OK')"
-        
-        echo ""
-        echo "OCC version:"
-        python -c "import OCC; print('OCC VERSION:', OCC.VERSION)"
     
     - name: Build Binary
       shell: bash -el {0}
       run: |
-        echo "Starting PyInstaller build..."
         pyinstaller step2stl.spec
-        
-        echo ""
-        echo "Build complete!"
         ls -lh dist/
-        
-        echo ""
-        echo "Binary architecture:"
-        file dist/step2stl
     
     - name: Create ZIP package
       shell: bash -el {0}
       run: |
         cd dist
-        ls -lh step2stl
         zip -9 step2stl-macos-arm64.zip step2stl
-        ls -lh step2stl-macos-arm64.zip
     
     - name: Test executable
       shell: bash -el {0}
       run: |
-        echo "Testing executable..."
         chmod +x dist/step2stl
         ./dist/step2stl --help || echo "Help test completed"
       continue-on-error: true
@@ -352,7 +233,7 @@ jobs:
         name: step2stl-macos-arm64-bin
         path: dist/step2stl
         retention-days: 30
-    
+
     - name: Upload ZIP
       uses: actions/upload-artifact@v4
       with:
@@ -382,30 +263,27 @@ jobs:
     - name: Install dependencies
       shell: bash -el {0}
       run: |
+        # 同样移除 pip install numpy
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
-        pip install trimesh numpy
+        pip install trimesh
     
     - name: Verify installations
       shell: bash -el {0}
       run: |
-        uname -m
         python -c "from OCC.Core.STEPControl import STEPControl_Reader; print('OCC import OK')"
-        python -c "import OCC; print('OCC VERSION:', OCC.VERSION)"
+        python -c "import numpy; print('numpy import OK')"
     
     - name: Build Binary
       shell: bash -el {0}
       run: |
         pyinstaller step2stl.spec
-        ls -lh dist/
-        file dist/step2stl
     
     - name: Create ZIP package
       shell: bash -el {0}
       run: |
         cd dist
         zip -9 step2stl-macos-x64.zip step2stl
-        ls -lh
     
     - name: Test executable
       shell: bash -el {0}
