@@ -45,38 +45,50 @@ jobs:
     - name: Install dependencies
       shell: bash -el {0}
       run: |
-        echo "Installing Dependencies"
-        # 1. Conda 安装 pythonocc (含 numpy)
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }}
-        
-        # 2. Pip 安装工具
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
-        
-        # 3. Pip 安装纯 Python 库 (不要装 numpy)
         pip install trimesh==3.23.5
         pip install "jaraco.text>=3.0" "jaraco.functools>=3.5.0" "jaraco.context>=4.0"
     
-    - name: Verify installations
+    # [新增步骤] 创建编码修复钩子
+    # 这个文件会被 PyInstaller 打包进 exe，启动时自动运行，强制 UTF-8 输出
+    - name: Create Encoding Hook
       shell: bash -el {0}
       run: |
-        echo "Checking libraries..."
-        python -c "import numpy; print('Numpy path:', numpy.__path__)"
-        python -c "import OCC; print('OCC ok')"
-    
+        echo "Creating runtime hook for UTF-8..."
+        cat > rthook_encoding.py <<EOF
+        import sys
+        import io
+        try:
+            if sys.stdout.encoding != 'utf-8':
+                sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+            if sys.stderr.encoding != 'utf-8':
+                sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+        except Exception:
+            pass
+        EOF
+        echo "Hook created: rthook_encoding.py"
+
     - name: Build EXE
       shell: bash -el {0}
       run: |
         echo "Starting Build..."
-        # 运行刚才修改过的 step2stl.spec
-        pyinstaller --log-level=INFO step2stl.spec
+        # 确保 rthook_encoding.py 存在
+        if [ ! -f "rthook_encoding.py" ]; then
+           echo "Error: Hook file missing!"
+           exit 1
+        fi
         
-        echo "Build finished."
+        pyinstaller --log-level=INFO step2stl.spec
         ls -lh dist/
     
     - name: Test executable
       shell: bash -el {0}
+      env:
+        PYTHONUTF8: 1
       run: |
         echo "Testing EXE..."
+        # 此时 exe 内部有 hook 强制 utf-8，应该可以正确打印中文了
         ./dist/step2stl.exe --help
     
     - name: Pack and Upload
@@ -122,6 +134,11 @@ jobs:
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh
+        
+    # 为了保证 Mac 打包不出错，也要生成这个 hook 文件（虽然 spec 引用了它，但 Mac 不需要它实际工作，只要存在即可）
+    - name: Create Dummy Hook
+      shell: bash -el {0}
+      run: touch rthook_encoding.py
     
     - name: Build Binary
       shell: bash -el {0}
@@ -172,6 +189,10 @@ jobs:
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh
+
+    - name: Create Dummy Hook
+      shell: bash -el {0}
+      run: touch rthook_encoding.py
     
     - name: Build Binary
       shell: bash -el {0}
