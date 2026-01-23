@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-step2stl PyInstaller Build Configuration (Nuclear Option for Win7)
+step2stl PyInstaller Build Configuration (Win7 OCC/TK Fix)
 """
 
 import sys
@@ -35,7 +35,7 @@ def sanitize_tuples(raw_list):
     return list(set(clean))
 
 _safe_print("=" * 70)
-_safe_print("step2stl Build Config (Nuclear Option)")
+_safe_print("step2stl Build Config (Win7 + OCC DLL Fix)")
 _safe_print("=" * 70)
 
 # ==========================================
@@ -49,8 +49,6 @@ if not conda_prefix:
     except:
         pass
 
-_safe_print(f"Conda Prefix: {conda_prefix}")
-
 # ==========================================
 # 3. Init
 # ==========================================
@@ -60,37 +58,50 @@ binaries = []
 pathex = []
 
 # ==========================================
-# 4. DLL Collection (The Nuclear Approach)
+# 4. Critical DLL Collection
 # ==========================================
 if sys.platform == 'win32' and conda_prefix:
     lib_bin = os.path.join(conda_prefix, 'Library', 'bin')
     
     if os.path.exists(lib_bin):
         pathex.append(lib_bin)
-        _safe_print("\n[DLL Injection: Nuclear Mode]")
-        _safe_print("Copying ALL DLLs from Library/bin to ensure Win7 compatibility...")
+        _safe_print("\n[Collecting Critical DLLs]")
         
-        # 暴力获取所有 DLL，不再筛选
-        all_dlls = glob.glob(os.path.join(lib_bin, '*.dll'))
+        # 4.1 OpenCASCADE Core DLLs (The missing link for StlAPI)
+        # OCC 的核心是由几十个 TK 开头的 DLL 组成的，必须全部打包
+        occ_patterns = [
+            'TK*.dll',         # OCC 核心组件 (TKKernel, TKMath, TKStl...)
+            'tbb*.dll',        # Intel TBB (OCC 依赖)
+            'freeimage*.dll',  # 图像处理 (OCC 依赖)
+            'freetype*.dll',   # 字体 (OCC 依赖)
+            'gl*.dll',         # OpenGL
+            'freet*.dll'
+        ]
+
+        # 4.2 Win7 System / Numpy DLLs
+        sys_patterns = [
+            'mkl_*.dll', 'libopenblas*.dll', 'libiomp5md.dll',
+            'api-ms-win-*.dll', # Win7 API 垫片
+            'ucrtbase.dll',     # C 运行时
+            'vcruntime*.dll',   # VC 运行时
+            'msvcp*.dll',       # VC++ 运行时
+            'concrt*.dll',
+            'zlib*.dll'
+        ]
+        
+        all_patterns = occ_patterns + sys_patterns
         
         count = 0
-        for dll_path in all_dlls:
-            dll_name = os.path.basename(dll_path).lower()
-            
-            # 排除 python 自身的 dll，防止冲突 (由 PyInstaller 处理)
-            if dll_name.startswith('python3') or dll_name == 'python.dll':
-                continue
+        for pattern in all_patterns:
+            found_dlls = glob.glob(os.path.join(lib_bin, pattern))
+            for dll in found_dlls:
+                # 排除 debug 版本 (以 d.dll 结尾) 减小体积
+                if dll.lower().endswith('d.dll') and not dll.lower().endswith('bnd.dll'):
+                    continue
+                binaries.append((dll, '.'))
+                count += 1
                 
-            # 排除一些典型的系统级驱动，避免权限问题
-            if dll_name in ['opengl32.dll', 'glu32.dll', 'd3d9.dll', 'kernel32.dll']:
-                continue
-
-            binaries.append((dll_path, '.'))
-            count += 1
-            
-        _safe_print(f"  Brute-force injected {count} DLLs.")
-    else:
-        _safe_print("Warning: Library/bin not found!")
+        _safe_print(f"  Collected {count} DLLs (TK*, TBB, System)")
 
 # ==========================================
 # 5. Collect Python Dependencies
@@ -119,20 +130,19 @@ try:
 except:
     hiddenimports.append('trimesh')
 
-# OCC
+# OCC (Python side)
 hiddenimports.extend([
     'OCC', 'OCC.Core',
     'OCC.Core.STEPControl', 'OCC.Core.StlAPI', 'OCC.Core.BRepMesh',
     'OCC.Core.IFSelect', 'OCC.Core.Bnd', 'OCC.Core.BRepBndLib',
-    'OCC.Core.TCollection', 'OCC.Core.TColStd', 'OCC.Core.Standard', # 增加一些基础模块
-    'OCC.Core.TopoDS', 'OCC.Core.TopExp'
+    'OCC.Core.TCollection', 'OCC.Core.Standard', 'OCC.Core.TopoDS'
 ])
 
 # Misc
 hiddenimports.extend([
     'ipaddress', 'urllib', 'urllib.parse', 'pathlib', 'argparse',
     'collections', 'collections.abc', 'warnings', 'traceback',
-    'shutil', 'tempfile', 'copy', 'zipfile', 'ctypes', 'typing'
+    'shutil', 'tempfile', 'copy', 'zipfile', 'ctypes'
 ])
 
 # ==========================================
@@ -150,7 +160,7 @@ block_cipher = None
 a = Analysis(
     ['step2stl.py'],
     pathex=pathex,
-    binaries=binaries, # 包含了所有的 Library/bin DLL
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=['./hooks'],
@@ -163,7 +173,7 @@ a = Analysis(
     noarchive=False,
 )
 
-# Remove pkg_resources hook
+# Remove pkg_resources
 a.scripts = [s for s in a.scripts if 'pyi_rth_pkgres' not in s[1]]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
@@ -178,7 +188,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False, # 坚决关闭 UPX，Win7 对压缩壳很敏感
+    upx=False, # Win7 必须关闭 UPX
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
