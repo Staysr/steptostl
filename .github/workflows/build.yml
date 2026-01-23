@@ -13,17 +13,15 @@ env:
   # Win7 兼容配置
   PYTHON_WIN: "3.8"
   OCC_VERSION_WIN: "7.7.2"
-  
   PYTHON_MAC: "3.10"
   OCC_VERSION_MAC: "7.8.1"
-  
   PYINSTALLER_VERSION: "6.9.0"
   PYTHONIOENCODING: "utf-8"
   PYTHONUTF8: "1"
 
 jobs:
   # ==========================================
-  # Windows x64 构建 (Win7 Ultimate Fix)
+  # Windows x64 构建 (Folder Mode)
   # ==========================================
   build-windows-x64:
     runs-on: windows-2019
@@ -48,41 +46,26 @@ jobs:
     - name: Install dependencies
       shell: bash -el {0}
       run: |
-        echo "Installing Dependencies"
-        # 强制安装核心库
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }} "numpy<2.0" libpython ucrt vs2015_runtime
-        
-        # Pip 安装
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh==3.23.5
         pip install "jaraco.text>=3.0" "jaraco.functools>=3.5.0" "jaraco.context>=4.0"
 
-    # [关键步骤 1] 创建 Win7 路径修复钩子
-    # 这个脚本强制把程序运行目录加入 PATH，解决 DLL 找不到的问题
-    - name: Create Win7 PATH Hook
+    - name: Create Runtime Hooks
       shell: bash -el {0}
       run: |
-        echo "Creating Win7 PATH fixer..."
+        # Win7 路径修复
         cat > rthook_win7.py <<EOF
         import os
         import sys
         try:
-            # 获取程序运行时的临时目录 (_MEIxxxx)
-            if hasattr(sys, '_MEIPASS'):
-                base_path = sys._MEIPASS
-            else:
-                base_path = os.path.dirname(os.path.abspath(__file__))
-            
-            # 将该目录强行加到 PATH 最前面
+            base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
             os.environ['PATH'] = base_path + ';' + os.environ.get('PATH', '')
         except Exception:
             pass
         EOF
-
-    # [关键步骤 2] 创建中文编码修复钩子
-    - name: Create Encoding Hook
-      shell: bash -el {0}
-      run: |
+        
+        # 编码修复
         cat > rthook_encoding.py <<EOF
         import sys
         import io
@@ -95,36 +78,31 @@ jobs:
             pass
         EOF
 
-    - name: Build EXE
+    - name: Build EXE (OneDir)
       shell: bash -el {0}
       run: |
         echo "Starting Build..."
-        # 确保钩子文件存在
-        ls -lh rthook_*.py
-        
-        # 执行打包
         pyinstaller --log-level=INFO step2stl.spec
-        ls -lh dist/
+        
+        echo "Build Complete. Checking dist folder:"
+        ls -lh dist/step2stl/
     
     - name: Test executable
       shell: bash -el {0}
       env:
         PYTHONUTF8: 1
       run: |
-        ./dist/step2stl.exe --help
+        # 注意路径变了，现在是在文件夹里
+        ./dist/step2stl/step2stl.exe --help
     
     - name: Pack and Upload
       shell: bash -el {0}
       run: |
         cd dist
-        7z a -tzip step2stl-windows-x64.zip step2stl.exe
+        # 将整个文件夹压缩
+        7z a -tzip step2stl-windows-x64.zip step2stl/
     
-    - name: Upload EXE
-      uses: actions/upload-artifact@v4
-      with:
-        name: step2stl-windows-x64-exe
-        path: dist/step2stl.exe
-
+    # 只需要上传 ZIP，文件夹里的散文件不用上传了
     - name: Upload ZIP
       uses: actions/upload-artifact@v4
       with:
@@ -158,20 +136,22 @@ jobs:
       run: |
         touch rthook_encoding.py
         touch rthook_win7.py
+    # 注意：Mac 依然使用原来的逻辑，因为 Mac 不受 Spec 的 OneDir 影响（除非我们特意改 spec，但上面的 spec 是通用的，只是在 Mac 上我们依然可以生成 OneFile，或者统一变成 OneDir）
+    # 这里的 Spec 在 Mac 上也会生成 OneDir。为了简单起见，我们让 Mac 也生成文件夹模式，这样更稳定。
     - name: Build Binary
       shell: bash -el {0}
       run: pyinstaller step2stl.spec
     - name: Test executable
       shell: bash -el {0}
       run: |
-        chmod +x dist/step2stl
-        ./dist/step2stl --help || echo "Help test passed"
+        chmod +x dist/step2stl/step2stl
+        ./dist/step2stl/step2stl --help || echo "Help test passed"
       continue-on-error: true
     - name: Upload ZIP
       shell: bash -el {0}
       run: |
         cd dist
-        zip -9 step2stl-macos-arm64.zip step2stl
+        zip -r -9 step2stl-macos-arm64.zip step2stl/
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
@@ -179,7 +159,7 @@ jobs:
         path: dist/step2stl-macos-arm64.zip
 
   # ==========================================
-  # macOS Intel x64 构建 (保持不变)
+  # macOS Intel x64 构建 (保持不变，调整为 Folder)
   # ==========================================
   build-macos-x64:
     runs-on: macos-13
@@ -211,14 +191,14 @@ jobs:
     - name: Test executable
       shell: bash -el {0}
       run: |
-        chmod +x dist/step2stl
-        ./dist/step2stl --help || echo "Help test passed"
+        chmod +x dist/step2stl/step2stl
+        ./dist/step2stl/step2stl --help || echo "Help test passed"
       continue-on-error: true
     - name: Upload ZIP
       shell: bash -el {0}
       run: |
         cd dist
-        zip -9 step2stl-macos-x64.zip step2stl
+        zip -r -9 step2stl-macos-x64.zip step2stl/
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
