@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-step2stl PyInstaller Build Configuration (With Encoding Fix)
+step2stl PyInstaller Build Configuration (Win7 Ultimate Fix)
 """
 
 import sys
@@ -18,7 +18,6 @@ def _safe_print(msg):
         pass
 
 def sanitize_imports(raw_list):
-    """过滤 hiddenimports，确保里面全是字符串"""
     clean = []
     if not raw_list: return clean
     for item in raw_list:
@@ -27,7 +26,6 @@ def sanitize_imports(raw_list):
     return list(set(clean))
 
 def sanitize_tuples(raw_list):
-    """过滤 binaries 和 datas，确保是 (str, str)"""
     clean = []
     if not raw_list: return clean
     for item in raw_list:
@@ -37,11 +35,11 @@ def sanitize_tuples(raw_list):
     return list(set(clean))
 
 _safe_print("=" * 70)
-_safe_print("step2stl Build Config (Encoding Fixed)")
+_safe_print("step2stl Build Config (Win7 Ultimate Mode)")
 _safe_print("=" * 70)
 
 # ==========================================
-# 2. Environment & Conda
+# 2. Environment
 # ==========================================
 conda_prefix = os.environ.get('CONDA_PREFIX')
 if not conda_prefix:
@@ -60,25 +58,55 @@ binaries = []
 pathex = []
 
 # ==========================================
-# 4. Windows Conda DLL Fix
+# 4. Windows 7 DLL Injection (CRITICAL)
 # ==========================================
 if sys.platform == 'win32' and conda_prefix:
     lib_bin = os.path.join(conda_prefix, 'Library', 'bin')
-    if os.path.exists(lib_bin):
-        pathex.append(lib_bin)
-        dll_patterns = [
-            'mkl_*.dll', 'libopenblas*.dll', 'libiomp5md.dll',
-            'tbb*.dll', 'freeimage*.dll', 'freetype*.dll',
-            'zlib*.dll', 'lzma*.dll'
-        ]
-        for pattern in dll_patterns:
-            for dll in glob.glob(os.path.join(lib_bin, pattern)):
+    conda_bin = os.path.join(conda_prefix, 'bin') # Sometimes DLLs are here
+    
+    # Add search paths
+    if os.path.exists(lib_bin): pathex.append(lib_bin)
+    if os.path.exists(conda_bin): pathex.append(conda_bin)
+
+    _safe_print("\n[Windows 7 Hardcore Fix]")
+    
+    # 4.1. Standard Dependencies (OCC/Numpy/MKL)
+    dll_patterns = [
+        'mkl_*.dll', 'libopenblas*.dll', 'libiomp5md.dll', # Numpy
+        'tbb*.dll', 'freeimage*.dll', 'freetype*.dll',     # OCC
+        'zlib*.dll', 'lzma*.dll',                          # Compression
+        'sqlite3.dll'
+    ]
+    
+    # 4.2. UCRT & System API DLLs (The Win7 Fix)
+    # 强行打包 UCRT 和 api-ms-win-* 使得程序自带运行环境
+    win7_patterns = [
+        'ucrtbase.dll',
+        'api-ms-win-*.dll',
+        'vcruntime*.dll',
+        'msvcp*.dll',
+        'concrt*.dll'
+    ]
+    
+    all_patterns = dll_patterns + win7_patterns
+    
+    count = 0
+    # Search in both Library/bin and bin (sometimes location varies)
+    for search_dir in [lib_bin, conda_bin]:
+        if not os.path.exists(search_dir): continue
+        
+        for pattern in all_patterns:
+            found = glob.glob(os.path.join(search_dir, pattern))
+            for dll in found:
+                # Pack them next to the executable
                 binaries.append((dll, '.'))
+                count += 1
+                
+    _safe_print(f"  Injected {count} DLLs (including UCRT/API-MS) for Win7 compatibility")
 
 # ==========================================
-# 5. Collect Dependencies
+# 5. Collect Python Dependencies
 # ==========================================
-# Numpy
 try:
     np_hidden, np_bin, np_data = collect_all('numpy')
     if np_hidden: hiddenimports.extend(np_hidden)
@@ -87,7 +115,6 @@ try:
 except:
     hiddenimports.extend(['numpy', 'numpy.core', 'numpy._core'])
 
-# Jaraco
 try:
     j_hidden, j_bin, j_data = collect_all('jaraco')
     if j_hidden: hiddenimports.extend(j_hidden)
@@ -95,21 +122,18 @@ try:
 except:
     hiddenimports.extend(['jaraco.text', 'jaraco.functools', 'jaraco.context'])
 
-# Trimesh
 try:
     tm_hidden = collect_submodules('trimesh')
     if tm_hidden: hiddenimports.extend(tm_hidden)
 except:
     hiddenimports.append('trimesh')
 
-# Misc
 hiddenimports.extend([
     'ipaddress', 'urllib', 'urllib.parse', 'pathlib', 'argparse',
     'collections', 'collections.abc', 'warnings', 'traceback',
-    'shutil', 'tempfile', 'copy', 'zipfile'
+    'shutil', 'tempfile', 'copy', 'zipfile', 'ctypes'
 ])
 
-# OCC
 hiddenimports.extend([
     'OCC', 'OCC.Core',
     'OCC.Core.STEPControl', 'OCC.Core.StlAPI', 'OCC.Core.BRepMesh',
@@ -124,7 +148,7 @@ binaries = sanitize_tuples(binaries)
 datas = sanitize_tuples(datas)
 
 # ==========================================
-# 7. Analysis (注意这里增加了 runtime_hooks)
+# 7. Analysis
 # ==========================================
 block_cipher = None
 
@@ -136,8 +160,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=['./hooks'],
     hooksconfig={},
-    # 关键修改：添加运行时钩子，解决中文乱码崩溃问题
-    runtime_hooks=['./rthook_encoding.py'], 
+    runtime_hooks=['./rthook_encoding.py'],
     excludes=['tkinter', 'PyQt5', 'PyQt6', 'matplotlib', 'scipy', 'pytest', 'IPython', 'numpy.f2py.tests'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -145,6 +168,7 @@ a = Analysis(
     noarchive=False,
 )
 
+# Remove pkg_resources hook
 a.scripts = [s for s in a.scripts if 'pyi_rth_pkgres' not in s[1]]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)

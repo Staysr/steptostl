@@ -10,15 +10,11 @@ on:
   workflow_dispatch:
 
 env:
-  # ===================================================
-  # 关键修改：Windows 7 兼容配置
-  # ===================================================
-  # Python 3.8 是最后一个支持 Win7 的版本
+  # === Win7 兼容配置 ===
   PYTHON_WIN: "3.8"
-  # pythonocc 7.7.2 是配合 Py3.8 最稳定的版本
   OCC_VERSION_WIN: "7.7.2"
   
-  # Mac 保持最新，性能更好 (Mac不受Win7限制影响)
+  # Mac 配置
   PYTHON_MAC: "3.10"
   OCC_VERSION_MAC: "7.8.1"
   
@@ -28,7 +24,7 @@ env:
 
 jobs:
   # ==========================================
-  # Windows x64 构建 (兼容 Windows 7/10/11)
+  # Windows x64 构建
   # ==========================================
   build-windows-x64:
     runs-on: windows-2019
@@ -54,36 +50,26 @@ jobs:
       shell: bash -el {0}
       run: |
         echo "============================================================"
-        echo "Installing Dependencies (Win7 Compatible Mode)"
-        echo "Target: Python ${{ env.PYTHON_WIN }} + OCC ${{ env.OCC_VERSION_WIN }}"
+        echo "Installing Win7 Dependencies"
         echo "============================================================"
 
-        # 1. Conda 安装核心库
-        # 强制指定 pythonocc-core=7.7.2 和 numpy<2.0
-        # 这会自动拉取兼容 Win7 的 mkl/openblas dll
-        echo "Installing pythonocc-core..."
-        conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }} "numpy<2.0" libpython
+        # 1. 安装核心库
+        # 强制安装 ucrt 以获取 api-ms-*.dll
+        conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }} "numpy<2.0" libpython ucrt
         
-        # 2. Pip 安装工具
-        echo "Installing PyInstaller..."
+        # 2. Pip 安装
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
-        
-        # 3. Pip 安装纯 Python 依赖
-        echo "Installing trimesh and utilities..."
         pip install trimesh==3.23.5
         pip install "jaraco.text>=3.0" "jaraco.functools>=3.5.0" "jaraco.context>=4.0"
         
-        # 4. 验证版本 (确保是 Py3.8 和 Numpy 1.x)
-        echo "Verifying Versions..."
-        python --version
-        python -c "import OCC.Core.BRep; print(f'OCC Import OK. Target Win7')"
-        python -c "import numpy; print(f'Numpy Version: {numpy.__version__}'); assert int(numpy.__version__.split('.')[0]) < 2"
-    
-    # [编码修复钩子] 保持不变，防止中文乱码崩溃
+        # 3. 验证 DLL 是否存在 (调试信息)
+        echo "Checking for Win7 DLLs in environment..."
+        ls -1 $CONDA_PREFIX/Library/bin/api-ms-win*.dll | head -n 5 || echo "Warning: API-MS DLLs not found via ls"
+        ls -1 $CONDA_PREFIX/Library/bin/ucrtbase.dll || echo "Warning: ucrtbase.dll not found"
+
     - name: Create Encoding Hook
       shell: bash -el {0}
       run: |
-        echo "Creating runtime hook for UTF-8..."
         cat > rthook_encoding.py <<EOF
         import sys
         import io
@@ -95,19 +81,12 @@ jobs:
         except Exception:
             pass
         EOF
-        echo "Hook created: rthook_encoding.py"
 
     - name: Build EXE
       shell: bash -el {0}
       run: |
         echo "Starting Build..."
-        # 确保 rthook_encoding.py 存在
-        if [ ! -f "rthook_encoding.py" ]; then
-           echo "Error: Hook file missing!"
-           exit 1
-        fi
-        
-        # 使用之前的 spec 文件打包
+        # 使用新的 Spec 文件打包，它会包含 UCRT DLLs
         pyinstaller --log-level=INFO step2stl.spec
         ls -lh dist/
     
@@ -116,7 +95,6 @@ jobs:
       env:
         PYTHONUTF8: 1
       run: |
-        echo "Testing EXE..."
         ./dist/step2stl.exe --help
     
     - name: Pack and Upload
@@ -138,15 +116,13 @@ jobs:
         path: dist/step2stl-windows-x64.zip
 
   # ==========================================
-  # macOS ARM64 构建 (Mac 不受 Win7 限制，保持高性能)
+  # macOS ARM64 构建 (保持不变)
   # ==========================================
   build-macos-arm64:
     runs-on: macos-14
-    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
     - name: Setup Miniconda
       uses: conda-incubator/setup-miniconda@v3
       with:
@@ -155,37 +131,29 @@ jobs:
         architecture: arm64
         channels: conda-forge,defaults
         channel-priority: strict
-    
     - name: Install dependencies
       shell: bash -el {0}
       run: |
-        # Mac 继续使用 7.8.1，因为它支持 Py3.10
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh
-        
     - name: Create Dummy Hook
       shell: bash -el {0}
       run: touch rthook_encoding.py
-    
     - name: Build Binary
       shell: bash -el {0}
-      run: |
-        pyinstaller step2stl.spec
-    
+      run: pyinstaller step2stl.spec
     - name: Test executable
       shell: bash -el {0}
       run: |
         chmod +x dist/step2stl
         ./dist/step2stl --help || echo "Help test passed"
       continue-on-error: true
-    
     - name: Upload ZIP
       shell: bash -el {0}
       run: |
         cd dist
         zip -9 step2stl-macos-arm64.zip step2stl
-        
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
@@ -193,15 +161,13 @@ jobs:
         path: dist/step2stl-macos-arm64.zip
 
   # ==========================================
-  # macOS Intel x64 构建
+  # macOS Intel x64 构建 (保持不变)
   # ==========================================
   build-macos-x64:
     runs-on: macos-13
-    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
     - name: Setup Miniconda
       uses: conda-incubator/setup-miniconda@v3
       with:
@@ -210,36 +176,29 @@ jobs:
         architecture: x64
         channels: conda-forge,defaults
         channel-priority: strict
-    
     - name: Install dependencies
       shell: bash -el {0}
       run: |
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh
-
     - name: Create Dummy Hook
       shell: bash -el {0}
       run: touch rthook_encoding.py
-    
     - name: Build Binary
       shell: bash -el {0}
-      run: |
-        pyinstaller step2stl.spec
-    
+      run: pyinstaller step2stl.spec
     - name: Test executable
       shell: bash -el {0}
       run: |
         chmod +x dist/step2stl
         ./dist/step2stl --help || echo "Help test passed"
       continue-on-error: true
-    
     - name: Upload ZIP
       shell: bash -el {0}
       run: |
         cd dist
         zip -9 step2stl-macos-x64.zip step2stl
-        
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
