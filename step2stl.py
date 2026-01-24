@@ -138,76 +138,137 @@ class StepToStlConverter:
             deflection = quality_factor
         
         return deflection, max_dim, dimensions
-    
-    def extract_assembly_components(self, input_path: str) -> List[Tuple[TopoDS_Shape, str, Optional[Tuple[float, float, float]]]]:
-        """
-        从STEP文件中提取装配体的各个部件
+
+    def extract_assembly_components(self, input_path: str) -> List[Tuple[TopoDS_Shape, str, Optional[Tuple[float, float, float]]]]: 
+        """ 
+        从STEP文件中提取装配体的各个部件（修复版：正确提取名称）
         
-        Args:
+        Args: 
             input_path: STEP文件路径
             
-        Returns:
+        Returns: 
             List[Tuple[shape, name, color]]: 部件列表
-        """
-        if not XCAF_AVAILABLE:
-            print("⚠️  警告: 未找到XCAF模块，无法识别装配体部件", file=sys.stderr)
-            return []
+        """ 
+        if not XCAF_AVAILABLE: 
+            print("⚠️  警告: 未找到XCAF模块，无法识别装配体部件", file=sys.stderr) 
+            return [] 
         
-        try:
-            print("🔍 [部件识别] 使用DataExchange API读取...", end='', flush=True)
-            from OCC.Extend.DataExchange import read_step_file_with_names_colors
-            from OCC.Core.TopAbs import TopAbs_SOLID, TopAbs_COMPOUND
+        try: 
+            print("🔍 [部件识别] 使用XCAF API读取...", end='', flush=True) 
             
-            # 返回值是列表，每个元素是元组 (shape, label/name, color)
-            shapes_labels_colors = read_step_file_with_names_colors(str(input_path))
+            # 导入额外需要的模块
+            from OCC.Core.TDataStd import TDataStd_Name
+            from OCC.Core.TDocStd import TDocStd_Document
+            from OCC.Core.STEPCAFControl import STEPCAFControl_Reader
+            from OCC.Core.XCAFDoc import XCAFDoc_DocumentTool
+            from OCC.Core.TDF import TDF_LabelSequence
+            from OCC.Core.TopAbs import TopAbs_SOLID
+            from collections import defaultdict
+            import re
             
-            if not shapes_labels_colors or len(shapes_labels_colors) == 0:
-                print(" ❌ (未找到部件)")
+            # 1. 创建文档和读取器
+            doc = TDocStd_Document("pythonocc-doc")
+            shape_tool = XCAFDoc_DocumentTool.ShapeTool(doc.Main())
+            color_tool = XCAFDoc_DocumentTool.ColorTool(doc.Main())
+            
+            reader = STEPCAFControl_Reader()
+            reader.SetColorMode(True)
+            reader.SetLayerMode(True)
+            reader.SetNameMode(True)
+            
+            if reader.ReadFile(str(input_path)) != 1:
+                print(" ❌ (无法读取文件)")
+                return []
+            
+            if not reader.Transfer(doc):
+                print(" ❌ (传输失败)")
                 return []
             
             print(" ✓")
             
+            # 2. 获取所有标签
+            all_labels = TDF_LabelSequence()
+            shape_tool.GetShapes(all_labels)
+            
+            total_records = all_labels.Length()
+            print(f"🔍 [部件识别] 分析 {total_records} 个元素...")
+            
             components = []
-            part_counter = 1
+            name_counter = defaultdict(int)  # 用于处理重复名称
             seen_shapes = set()
             
-            print(f"🔍 [部件识别] 分析 {len(shapes_labels_colors)} 个元素...")
-            
-            # 遍历返回的列表
-            for idx, item in enumerate(shapes_labels_colors):
+            # 3. 辅助函数：从标签提取名称
+            def get_name_from_label(label):
+                """从标签提取名称（核心修复）"""
+                name_attr = TDataStd_Name()
                 try:
-                    # 🔧 调试：打印item的结构
-                    shape = None
-                    name = None
-                    color = None
+                    # 尝试 GetID() 或 GetID_s()
+                    try:
+                        guid = TDataStd_Name.GetID()
+                    except AttributeError:
+                        guid = TDataStd_Name.GetID_s()
                     
-                    # 判断item的类型
-                    if isinstance(item, (tuple, list)):
-                        # 元组格式：(shape, name, color)
-                        if len(item) >= 1:
-                            shape = item[0]
-                        if len(item) >= 2:
-                            name = item[1]
-                        if len(item) >= 3:
-                            color = item[2]
-                        
-                        # 🔧 调试输出
-                        # print(f"   [调试] 项 {idx}: len={len(item)}, name={name}, shape_type={type(shape).__name__ if shape else 'None'}")
+                    if label.FindAttribute(guid, name_attr):
+                        ext_str = name_attr.Get()
+                        # 转换为字符串
+                        if hasattr(ext_str, 'ToExtString'):
+                            return ext_str.ToExtString()
+                        else:
+                            return str(ext_str)
+                except:
+                    pass
+                return None
+            
+            # 4. 辅助函数：从标签获取形状
+            def get_shape_from_label(label):
+                """从标签获取形状"""
+                try:
+                    # 尝试不同的API版本
+                    try:
+                        return shape_tool.GetShape(label)
+                    except:
+                        try:
+                            from OCC.Core.XCAFDoc import XCAFDoc_ShapeTool
+                            return XCAFDoc_ShapeTool.GetShape(label)
+                        except:
+                            return None
+                except:
+                    return None
+            
+            # 5. 辅助函数：获取颜色
+            def get_color_from_label(label, shape):
+                """从标签获取颜色"""
+                try:
+                    from OCC.Core.XCAFDoc import XCAFDoc_ColorGen
+                    color = Quantity_Color()
+                    if color_tool.GetColor(shape, XCAFDoc_ColorGen, color):
+                        return (color.Red(), color.Green(), color.Blue())
+                except:
+                    pass
+                return None
+            
+            # 6. 辅助函数：清理文件名
+            def sanitize_filename(name):
+                """清理文件名（去除非法字符）"""
+                if not name:
+                    return "unknown"
+                # 替换非法字符
+                cleaned = re.sub(r'[\\/*?:"<>|]', "_", str(name)).strip()
+                # 转小写（避免Windows文件名冲突）
+                return cleaned.lower() if cleaned else "unknown"
+            
+            # 7. 遍历所有标签
+            for i in range(1, total_records + 1):
+                try:
+                    label = all_labels.Value(i)
                     
-                    elif hasattr(item, 'IsNull'):
-                        # 直接是shape对象
-                        shape = item
-                    else:
+                    # 获取形状
+                    shape = get_shape_from_label(label)
+                    if not shape or shape.IsNull():
                         continue
                     
-                    # 检查形状是否有效
-                    if shape is None or shape.IsNull():
-                        continue
-                    
-                    # 🔧 关键：检查形状类型，只保留SOLID
-                    shape_type = shape.ShapeType()
-                    if shape_type != TopAbs_SOLID:
-                        # 跳过非SOLID类型（EDGE, COMPOUND等）
+                    # 只保留SOLID类型（过滤掉EDGE、COMPOUND等）
+                    if shape.ShapeType() != TopAbs_SOLID:
                         continue
                     
                     # 去重
@@ -216,39 +277,53 @@ class StepToStlConverter:
                         continue
                     seen_shapes.add(shape_id)
                     
-                    # 处理名称
-                    if name:
-                        # 提取字符串（可能是TCollection_ExtendedString或其他类型）
-                        if hasattr(name, 'ToExtString'):
-                            name = name.ToExtString()
-                        else:
-                            name = str(name)
-                        
-                        # 清理名称
-                        name = "".join(c for c in name if c.isalnum() or c in (' ', '_', '-')).strip()
+                    # 提取名称（核心修复）
+                    raw_name = get_name_from_label(label)
                     
-                    if not name or name == '':
-                        name = f"part_{part_counter:03d}"
-                    
-                    # 处理颜色
-                    rgb_color = None
-                    if color is not None:
+                    # 如果当前标签没有名称，尝试从父标签获取
+                    if not raw_name:
                         try:
-                            if hasattr(color, 'Red'):
-                                rgb_color = (color.Red(), color.Green(), color.Blue())
-                            elif isinstance(color, (tuple, list)) and len(color) >= 3:
-                                rgb_color = tuple(color[:3])
+                            father_label = label.Father()
+                            if not father_label.IsNull():
+                                raw_name = get_name_from_label(father_label)
                         except:
                             pass
                     
-                    components.append((shape, name, rgb_color))
-                    part_counter += 1
+                    # 如果仍然没有名称，尝试从引用形状获取（GetReferredShape）
+                    if not raw_name:
+                        try:
+                            referred_label = label
+                            if shape_tool.GetReferredShape(label, referred_label):
+                                if referred_label != label:
+                                    raw_name = get_name_from_label(referred_label)
+                        except:
+                            pass
                     
-                    color_info = f" (颜色: RGB{rgb_color})" if rgb_color else ""
-                    print(f"   ✓ 部件 {len(components)}: {name}{color_info}")
+                    # 如果还是没有名称，使用默认名称
+                    if not raw_name or raw_name.strip() == "":
+                        raw_name = "Part"
+                    
+                    # 清理名称
+                    safe_name = sanitize_filename(raw_name)
+                    
+                    # 处理重复名称（关键：避免覆盖）
+                    name_counter[safe_name] += 1
+                    if name_counter[safe_name] > 1:
+                        final_name = f"{safe_name}_{name_counter[safe_name]}"
+                    else:
+                        final_name = safe_name
+                    
+                    # 获取颜色
+                    color = get_color_from_label(label, shape)
+                    
+                    # 添加到结果
+                    components.append((shape, final_name, color))
+                    
+                    color_info = f" (颜色: RGB{color})" if color else ""
+                    print(f"   ✓ 部件 {len(components)}: {final_name}{color_info}")
                 
                 except Exception as item_error:
-                    # print(f"   ⚠️  跳过项 {idx}: {str(item_error)}")
+                    # 跳过错误的项
                     continue
             
             if components:
@@ -258,16 +333,12 @@ class StepToStlConverter:
                 print("⚠️  警告: 未找到有效SOLID部件")
                 return []
         
-        except ImportError:
-            print(" ❌ (DataExchange不可用)")
-            return []
-        
         except Exception as e:
             print(f" ❌ (失败: {str(e)})")
             import traceback
             traceback.print_exc(file=sys.stderr)
-            return []
-    
+            return []    
+
     def optimize_stl(self, stl_path: Path) -> Optional[Path]: 
         """ 
         优化STL文件（去除重复顶点，减小文件） 
