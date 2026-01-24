@@ -12,7 +12,7 @@ on:
 env:
   # Win7 兼容配置
   PYTHON_WIN: "3.8"
-  OCC_VERSION_WIN: "7.7.2"
+  OCC_VERSION_WIN: "7.5.1"
   PYTHON_MAC: "3.10"
   OCC_VERSION_MAC: "7.8.1"
   PYINSTALLER_VERSION: "6.9.0"
