@@ -105,17 +105,28 @@ class StepToStlConverter:
         self.parallel = parallel  # 并行处理标志
     
     def get_bounding_box_size(self, shape): 
-        """获取模型包围盒尺寸""" 
-        bbox = Bnd_Box() 
-        brepbndlib_Add(shape, bbox) 
-        xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get() 
+        """获取模型包围盒尺寸"""
+        from OCC.Core.Bnd import Bnd_Box
+        
+        bbox = Bnd_Box()
+        
+        # 🔧 使用新的静态方法 API（消除警告）
+        try:
+            from OCC.Core.BRepBndLib import brepbndlib
+            brepbndlib.Add(shape, bbox)
+        except (ImportError, AttributeError):
+            # 回退到旧 API
+            from OCC.Core.BRepBndLib import brepbndlib_Add
+            brepbndlib_Add(shape, bbox)
+        
+        xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
         
         dx = xmax - xmin
         dy = ymax - ymin
         dz = zmax - zmin
         
-        max_dim = max(dx, dy, dz) 
-        return max_dim, (dx, dy, dz) 
+        max_dim = max(dx, dy, dz)
+        return max_dim, (dx, dy, dz)
     
     def calculate_deflection(self, shape, quality_factor=0.05): 
         """ 
@@ -139,54 +150,165 @@ class StepToStlConverter:
         
         return deflection, max_dim, dimensions
 
-    def extract_assembly_components(self, input_path: str) -> List[Tuple[TopoDS_Shape, str, Optional[Tuple[float, float, float]]]]: 
-        """ 
-        从STEP文件中提取装配体的各个部件（修复版：正确提取名称）
+
+    def extract_assembly_components(self, input_path: str) -> List[Tuple[TopoDS_Shape, str, Optional[Tuple[float, float, float]]]]:
+        """
+        从STEP文件中提取装配体的各个部件
+        🔧 修复：使用 pythonocc-core 7.7.2 内置的 GetLabelName() 方法
+        """
+        if not XCAF_AVAILABLE:
+            print("⚠️  警告: 未找到XCAF模块，无法识别装配体部件", file=sys.stderr)
+            return []
         
-        Args: 
-            input_path: STEP文件路径
+        try:
+            print("🔍 [部件识别] 使用XCAF API读取...", end='', flush=True)
             
-        Returns: 
-            List[Tuple[shape, name, color]]: 部件列表
-        """ 
-        if not XCAF_AVAILABLE: 
-            print("⚠️  警告: 未找到XCAF模块，无法识别装配体部件", file=sys.stderr) 
-            return [] 
-        
-        try: 
-            print("🔍 [部件识别] 使用XCAF API读取...", end='', flush=True) 
-            
-            # 导入额外需要的模块
-            from OCC.Core.TDataStd import TDataStd_Name
             from OCC.Core.TDocStd import TDocStd_Document
             from OCC.Core.STEPCAFControl import STEPCAFControl_Reader
             from OCC.Core.XCAFDoc import XCAFDoc_DocumentTool
+            from OCC.Core.IFSelect import IFSelect_RetDone
             from OCC.Core.TDF import TDF_LabelSequence
             from OCC.Core.TopAbs import TopAbs_SOLID
+            from OCC.Core.Quantity import Quantity_Color
             from collections import defaultdict
             import re
             
-            # 1. 创建文档和读取器
-            doc = TDocStd_Document("pythonocc-doc")
+            try:
+                from OCC.Core.XCAFDoc import XCAFDoc_ColorGen, XCAFDoc_ColorSurf, XCAFDoc_ColorCurv
+            except:
+                XCAFDoc_ColorGen = 0
+                XCAFDoc_ColorSurf = 1
+                XCAFDoc_ColorCurv = 2
+            
+            # 1. 创建文档
+            doc = TDocStd_Document("pythonocc-doc-step-import")
+            
+            # 2. 获取工具
             shape_tool = XCAFDoc_DocumentTool.ShapeTool(doc.Main())
             color_tool = XCAFDoc_DocumentTool.ColorTool(doc.Main())
             
-            reader = STEPCAFControl_Reader()
-            reader.SetColorMode(True)
-            reader.SetLayerMode(True)
-            reader.SetNameMode(True)
+            # 3. 创建读取器
+            step_reader = STEPCAFControl_Reader()
+            step_reader.SetColorMode(True)
+            step_reader.SetLayerMode(True)
+            step_reader.SetNameMode(True)
             
-            if reader.ReadFile(str(input_path)) != 1:
+            # 4. 读取文件
+            status = step_reader.ReadFile(str(input_path))
+            if status != IFSelect_RetDone:
                 print(" ❌ (无法读取文件)")
                 return []
             
-            if not reader.Transfer(doc):
-                print(" ❌ (传输失败)")
-                return []
-            
+            step_reader.Transfer(doc)
             print(" ✓")
             
-            # 2. 获取所有标签
+            # ==========================================
+            # 🔧 修复：使用 pythonocc 7.7.2 内置的 GetLabelName()
+            # ==========================================
+            
+            def get_label_name(label):
+                """
+                从标签获取名称（支持中文）
+                🔧 使用 pythonocc-core 7.7.2 内置方法
+                """
+                if label.IsNull():
+                    return None
+                
+                try:
+                    # 🔧 方法1：使用内置的 GetLabelName() 方法（pythonocc 7.7.2+）
+                    # 这个方法已经正确处理了 UTF-8 编码
+                    try:
+                        name = label.GetLabelName()
+                        if name and len(name) > 0:
+                            return name
+                    except AttributeError:
+                        # 如果没有 GetLabelName 方法，尝试手动提取
+                        pass
+                    
+                    # 🔧 方法2：手动提取（回退方案）
+                    from OCC.Core.TDataStd import TDataStd_Name
+                    
+                    name_attr = TDataStd_Name()
+                    if label.FindAttribute(TDataStd_Name.GetID(), name_attr):
+                        ext_string = name_attr.Get()
+                        
+                        # 尝试使用 ToUTF8CString() 方法
+                        try:
+                            # 🔧 关键修复：使用 ToUTF8CString()
+                            utf8_str = ext_string.ToUTF8CString()
+                            if utf8_str:
+                                return utf8_str
+                        except:
+                            pass
+                        
+                        # 回退：尝试 ToCString()
+                        try:
+                            c_str = ext_string.ToCString()
+                            if c_str:
+                                return c_str
+                        except:
+                            pass
+                        
+                        # 最后的尝试：逐字符转换
+                        try:
+                            length = ext_string.Length()
+                            if length > 0:
+                                chars = []
+                                for i in range(1, length + 1):
+                                    try:
+                                        char_code = ext_string.Value(i)
+                                        if isinstance(char_code, int):
+                                            if 0 < char_code < 0x110000:  # 有效的 Unicode 范围
+                                                chars.append(chr(char_code))
+                                        else:
+                                            chars.append(str(char_code))
+                                    except:
+                                        pass
+                                
+                                name = ''.join(chars).strip()
+                                if name:
+                                    return name
+                        except:
+                            pass
+                
+                except Exception as e:
+                    # print(f"[DEBUG] 提取名称失败: {e}")
+                    pass
+                
+                return None
+            
+            def get_color(shape):
+                """获取形状颜色"""
+                try:
+                    c = Quantity_Color()
+                    for color_type in [XCAFDoc_ColorGen, XCAFDoc_ColorSurf, XCAFDoc_ColorCurv]:
+                        if color_tool.GetColor(shape, color_type, c):
+                            return (c.Red(), c.Green(), c.Blue())
+                except:
+                    pass
+                return None
+            
+            def sanitize_filename(name):
+                """清理文件名（保留中文）"""
+                if not name:
+                    return "Part"
+                
+                # 只移除文件系统不允许的字符，保留中文
+                cleaned = re.sub(r'[\\/*?:"<>|]', "_", str(name))
+                cleaned = cleaned.strip().rstrip('.')
+                
+                if not cleaned:
+                    return "Part"
+                
+                if len(cleaned) > 200:
+                    cleaned = cleaned[:200]
+                
+                return cleaned
+            
+            # ==========================================
+            # 获取所有形状
+            # ==========================================
+            
             all_labels = TDF_LabelSequence()
             shape_tool.GetShapes(all_labels)
             
@@ -194,119 +316,62 @@ class StepToStlConverter:
             print(f"🔍 [部件识别] 分析 {total_records} 个元素...")
             
             components = []
-            name_counter = defaultdict(int)  # 用于处理重复名称
+            name_counter = defaultdict(int)
             seen_shapes = set()
             
-            # 3. 辅助函数：从标签提取名称
-            def get_name_from_label(label):
-                """从标签提取名称（核心修复）"""
-                name_attr = TDataStd_Name()
-                try:
-                    # 尝试 GetID() 或 GetID_s()
-                    try:
-                        guid = TDataStd_Name.GetID()
-                    except AttributeError:
-                        guid = TDataStd_Name.GetID_s()
-                    
-                    if label.FindAttribute(guid, name_attr):
-                        ext_str = name_attr.Get()
-                        # 转换为字符串
-                        if hasattr(ext_str, 'ToExtString'):
-                            return ext_str.ToExtString()
-                        else:
-                            return str(ext_str)
-                except:
-                    pass
-                return None
+            # 统计
+            name_found = 0
+            name_from_father = 0
+            name_default = 0
             
-            # 4. 辅助函数：从标签获取形状
-            def get_shape_from_label(label):
-                """从标签获取形状"""
-                try:
-                    # 尝试不同的API版本
-                    try:
-                        return shape_tool.GetShape(label)
-                    except:
-                        try:
-                            from OCC.Core.XCAFDoc import XCAFDoc_ShapeTool
-                            return XCAFDoc_ShapeTool.GetShape(label)
-                        except:
-                            return None
-                except:
-                    return None
-            
-            # 5. 辅助函数：获取颜色
-            def get_color_from_label(label, shape):
-                """从标签获取颜色"""
-                try:
-                    from OCC.Core.XCAFDoc import XCAFDoc_ColorGen
-                    color = Quantity_Color()
-                    if color_tool.GetColor(shape, XCAFDoc_ColorGen, color):
-                        return (color.Red(), color.Green(), color.Blue())
-                except:
-                    pass
-                return None
-            
-            # 6. 辅助函数：清理文件名
-            def sanitize_filename(name):
-                """清理文件名（去除非法字符）"""
-                if not name:
-                    return "unknown"
-                # 替换非法字符
-                cleaned = re.sub(r'[\\/*?:"<>|]', "_", str(name)).strip()
-                # 转小写（避免Windows文件名冲突）
-                return cleaned.lower() if cleaned else "unknown"
-            
-            # 7. 遍历所有标签
             for i in range(1, total_records + 1):
                 try:
                     label = all_labels.Value(i)
+                    shape = shape_tool.GetShape(label)
                     
-                    # 获取形状
-                    shape = get_shape_from_label(label)
-                    if not shape or shape.IsNull():
+                    if shape is None or shape.IsNull():
                         continue
                     
-                    # 只保留SOLID类型（过滤掉EDGE、COMPOUND等）
                     if shape.ShapeType() != TopAbs_SOLID:
                         continue
                     
                     # 去重
-                    shape_id = id(shape)
-                    if shape_id in seen_shapes:
+                    try:
+                        shape_hash = shape.HashCode(2147483647)
+                    except:
+                        shape_hash = id(shape)
+                    
+                    if shape_hash in seen_shapes:
                         continue
-                    seen_shapes.add(shape_id)
+                    seen_shapes.add(shape_hash)
                     
-                    # 提取名称（核心修复）
-                    raw_name = get_name_from_label(label)
+                    # 🔧 获取名称（现在应该能正确获取中文了）
+                    raw_name = get_label_name(label)
                     
-                    # 如果当前标签没有名称，尝试从父标签获取
-                    if not raw_name:
+                    if raw_name:
+                        name_found += 1
+                        print(f"   🔍 [DEBUG] 找到名称: {raw_name}")  # 调试输出
+                    else:
+                        # 尝试父标签
                         try:
-                            father_label = label.Father()
-                            if not father_label.IsNull():
-                                raw_name = get_name_from_label(father_label)
+                            father = label.Father()
+                            if not father.IsNull():
+                                raw_name = get_label_name(father)
+                                if raw_name:
+                                    name_from_father += 1
+                                    print(f"   🔍 [DEBUG] 父标签名称: {raw_name}")
                         except:
                             pass
                     
-                    # 如果仍然没有名称，尝试从引用形状获取（GetReferredShape）
+                    # 默认名称
                     if not raw_name:
-                        try:
-                            referred_label = label
-                            if shape_tool.GetReferredShape(label, referred_label):
-                                if referred_label != label:
-                                    raw_name = get_name_from_label(referred_label)
-                        except:
-                            pass
-                    
-                    # 如果还是没有名称，使用默认名称
-                    if not raw_name or raw_name.strip() == "":
                         raw_name = "Part"
+                        name_default += 1
                     
                     # 清理名称
                     safe_name = sanitize_filename(raw_name)
                     
-                    # 处理重复名称（关键：避免覆盖）
+                    # 处理重复名称
                     name_counter[safe_name] += 1
                     if name_counter[safe_name] > 1:
                         final_name = f"{safe_name}_{name_counter[safe_name]}"
@@ -314,17 +379,19 @@ class StepToStlConverter:
                         final_name = safe_name
                     
                     # 获取颜色
-                    color = get_color_from_label(label, shape)
+                    color = get_color(shape)
                     
-                    # 添加到结果
                     components.append((shape, final_name, color))
                     
-                    color_info = f" (颜色: RGB{color})" if color else ""
+                    color_info = f" (颜色: RGB({color[0]:.2f}, {color[1]:.2f}, {color[2]:.2f}))" if color else ""
                     print(f"   ✓ 部件 {len(components)}: {final_name}{color_info}")
-                
-                except Exception as item_error:
-                    # 跳过错误的项
+                    
+                except Exception as e:
+                    print(f"   ⚠️  跳过元素 {i}: {e}")
                     continue
+            
+            # 输出统计
+            print(f"\n📊 [名称统计] 直接获取: {name_found}, 父标签: {name_from_father}, 默认: {name_default}")
             
             if components:
                 print(f"🔍 [部件识别] 成功识别 {len(components)} 个有效SOLID部件")
@@ -337,7 +404,174 @@ class StepToStlConverter:
             print(f" ❌ (失败: {str(e)})")
             import traceback
             traceback.print_exc(file=sys.stderr)
-            return []    
+            return []
+
+    def _convert_parts_only(self, input_file: Path, output_file: Path, 
+                           ascii_mode: bool, optimize: bool, 
+                           export_glb: bool) -> bool: 
+        """
+        只转换部件（拆分装配体）
+        🔧 完整版：支持 Windows 7 和 macOS/Linux
+        """
+        import gc
+        
+        # 🔧 增加文件句柄限制（跨平台）
+        try:
+            if sys.platform != 'win32':
+                # macOS/Linux
+                import resource
+                soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+                new_limit = min(hard, 8192)
+                resource.setrlimit(resource.RLIMIT_NOFILE, (new_limit, hard))
+                print(f"🔧 [系统] 文件句柄限制: {soft} → {new_limit}")
+            else:
+                # Windows: 使用 win32file 或跳过
+                try:
+                    import win32file
+                    # Windows 默认已经有足够的句柄限制
+                    print(f"🔧 [系统] Windows 文件句柄: 默认")
+                except ImportError:
+                    pass
+        except Exception as e:
+            print(f"⚠️  [系统] 无法调整文件句柄限制: {e}")
+        
+        try:
+            # 1. 提取部件
+            components = self.extract_assembly_components(str(input_file))
+            
+            if not components:
+                print("⚠️  未找到部件，尝试作为单一模型处理", file=sys.stderr)
+                step_reader = STEPControl_Reader()
+                status = step_reader.ReadFile(str(input_file))
+                if status == IFSelect_RetDone:
+                    step_reader.TransferRoots()
+                    shape = step_reader.OneShape()
+                    if not shape.IsNull():
+                        components = [(shape, "model", None)]
+                
+                if not components:
+                    return False
+            
+            print(f"\n🔨 开始转换 {len(components)} 个部件...")
+            
+            # 2. 创建临时目录
+            temp_dir_stl = output_file.parent / f"{output_file.stem}_parts_temp"
+            temp_dir_stl.mkdir(exist_ok=True)
+            
+            temp_dir_glb = None
+            if export_glb:
+                temp_dir_glb = output_file.parent / f"{output_file.stem}_parts_glb_temp"
+                temp_dir_glb.mkdir(exist_ok=True)
+            
+            success_count = 0
+            failed_count = 0
+            
+            # 🔧 批量 GC 设置（避免文件句柄耗尽）
+            BATCH_SIZE = 50
+            
+            # 3. 逐个转换部件
+            for idx, (shape, name, color) in enumerate(components, 1):
+                print(f"\n--- 部件 [{idx}/{len(components)}]: {name} ---")
+                
+                # 生成STL
+                stl_part_path = temp_dir_stl / f"{name}.stl"
+                print(f"📄 生成STL: {stl_part_path.name}...", end='', flush=True)
+                
+                if self.convert_shape_to_stl(shape, stl_part_path, ascii_mode):
+                    print(" ✓")
+                    part_size = stl_part_path.stat().st_size / (1024 * 1024)
+                    print(f"   大小: {part_size:.2f} MB")
+                    
+                    # 优化STL
+                    if optimize:
+                        optimized = self.optimize_stl(stl_part_path)
+                        if optimized:
+                            stl_part_path = optimized
+                    
+                    # 生成GLB
+                    if export_glb and temp_dir_glb:
+                        glb_part_path = temp_dir_glb / f"{name}.glb"
+                        self.export_glb(stl_part_path, glb_part_path, color)
+                    
+                    success_count += 1
+                else:
+                    print(" ❌")
+                    failed_count += 1
+                
+                # 🔧 批量释放资源（跨平台）
+                if idx % BATCH_SIZE == 0:
+                    gc.collect()
+                    print(f"   🔄 内存清理 ({idx}/{len(components)})")
+            
+            print(f"\n📊 部件转换完成: 成功 {success_count}, 失败 {failed_count}")
+            
+            # 🔧 压缩前强制 GC（释放所有文件句柄）
+            gc.collect()
+            
+            # 🔧 等待一小段时间确保文件句柄释放（Windows 需要）
+            import time
+            time.sleep(0.5)
+            
+            # 4. 压缩STL部件目录
+            zip_stl = output_file.parent / f"{output_file.stem}_parts.zip"
+            print()
+            zip_result = self.compress_directory(temp_dir_stl, zip_stl)
+            
+            # 5. 压缩GLB部件目录
+            zip_glb = None
+            if export_glb and temp_dir_glb:
+                zip_glb = output_file.parent / f"{output_file.stem}_parts_glb.zip"
+                print()
+                self.compress_directory(temp_dir_glb, zip_glb)
+            
+            # 6. 删除临时目录
+            print(f"\n🧹 清理临时文件...", end='', flush=True)
+            
+            # 🔧 安全删除临时目录（处理 Windows 文件锁定问题）
+            def safe_rmtree(path, retries=3):
+                """安全删除目录，支持重试"""
+                for attempt in range(retries):
+                    try:
+                        shutil.rmtree(path, ignore_errors=False)
+                        return True
+                    except Exception as e:
+                        if attempt < retries - 1:
+                            gc.collect()
+                            time.sleep(0.5)
+                        else:
+                            # 最后一次尝试使用 ignore_errors
+                            shutil.rmtree(path, ignore_errors=True)
+                            return False
+                return False
+            
+            safe_rmtree(temp_dir_stl)
+            if temp_dir_glb:
+                safe_rmtree(temp_dir_glb)
+            print(" ✓")
+            
+            # 7. 输出统计
+            print(f"\n{'='*70}")
+            print(f"✅ 部件拆分完成!")
+            print(f"\n📦 输出文件:")
+            
+            if zip_stl and zip_stl.exists():
+                zip_size = zip_stl.stat().st_size / (1024 * 1024)
+                print(f"   🗜️  {zip_stl.name} ({zip_size:.2f} MB, {success_count} 个STL部件)")
+            
+            if zip_glb and zip_glb.exists():
+                zip_glb_size = zip_glb.stat().st_size / (1024 * 1024)
+                print(f"   🗜️  {zip_glb.name} ({zip_glb_size:.2f} MB, {success_count} 个GLB部件)")
+            
+            print(f"{'='*70}\n")
+            
+            return success_count > 0
+            
+        except Exception as e:
+            print(f"\n❌ 错误: 部件转换失败 - {str(e)}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            return False
+
 
     def optimize_stl(self, stl_path: Path) -> Optional[Path]: 
         """ 
@@ -481,50 +715,135 @@ class StepToStlConverter:
             return None
     
     def export_glb(self, stl_path: Path, glb_path: Optional[Path] = None, 
-                   color: Optional[Tuple[float, float, float]] = None) -> Optional[Path]: 
-        """ 
+               color: Optional[Tuple[float, float, float]] = None) -> Optional[Path]:
+        """
         将STL转换为GLB格式
-        
-        Args: 
-            stl_path: STL文件路径
-            glb_path: GLB输出路径（可选） 
-            color: RGB颜色元组 (r, g, b) 范围0-1（可选）
-            
-        Returns: 
-            Path: GLB文件路径，失败返回None
-        """ 
-        if not TRIMESH_AVAILABLE: 
-            print("⚠️  警告: 未安装trimesh，无法导出GLB", file=sys.stderr) 
-            print("   安装命令: pip install trimesh", file=sys.stderr) 
+        🔧 智能版：自动检测 scipy，有则应用颜色，无则跳过
+        """
+        if not TRIMESH_AVAILABLE:
+            print("⚠️  警告: 未安装trimesh，无法导出GLB", file=sys.stderr)
             return None
         
-        if glb_path is None: 
-            glb_path = stl_path.with_suffix('.glb') 
+        if glb_path is None:
+            glb_path = stl_path.with_suffix('.glb')
         
-        try: 
-            print(f"📦 [GLB] 转换 {stl_path.name} → {glb_path.name}...", end='', flush=True) 
+        try:
+            print(f"📦 [GLB] 转换 {stl_path.name} → {glb_path.name}...", end='', flush=True)
             
-            # 加载STL
-            mesh = trimesh.load_mesh(str(stl_path), process=False) 
+            import trimesh
+            import numpy as np
             
-            # 应用颜色（如果提供）
-            if color:
-                # 转换为0-255范围
-                color_255 = [int(c * 255) for c in color] + [255]  # RGBA
-                mesh.visual = trimesh.visual.ColorVisuals(
-                    mesh=mesh,
-                    face_colors=color_255
-                )
+            # 检查 scipy 是否可用
+            try:
+                import scipy
+                SCIPY_AVAILABLE = True
+            except ImportError:
+                SCIPY_AVAILABLE = False
             
-            # 导出为GLB
-            mesh.export(str(glb_path), file_type='glb') 
-            print(" ✓") 
+            # 加载 STL
+            mesh = trimesh.load(str(stl_path), process=False)
             
+            # 🔧 只有在 scipy 可用时才应用颜色
+            if color and SCIPY_AVAILABLE:
+                try:
+                    color_rgba = np.array([color[0], color[1], color[2], 1.0])
+                    mesh.visual = trimesh.visual.ColorVisuals(
+                        mesh=mesh,
+                        face_colors=color_rgba
+                    )
+                except:
+                    pass
+            
+            # 导出 GLB
+            scene = trimesh.Scene(mesh)
+            glb_data = scene.export(file_type='glb')
+            
+            with open(glb_path, 'wb') as f:
+                f.write(glb_data)
+            
+            print(" ✓")
             return glb_path
             
-        except Exception as e: 
-            print(f"\n⚠️  警告: GLB导出失败 - {str(e)}", file=sys.stderr) 
+        except Exception as e:
+            print(f" ⚠️  (失败: {str(e)[:80]})")
             return None
+
+    @staticmethod
+    def _read_stl_binary(filepath):
+        """
+        🔧 手动读取 STL 二进制文件（不依赖任何额外库）
+        """
+        import struct
+        import numpy as np
+        
+        try:
+            with open(filepath, 'rb') as f:
+                # 读取头部
+                header = f.read(80)
+                
+                # 检查是否是 ASCII
+                try:
+                    if header[:5].decode('ascii') == 'solid':
+                        # 可能是 ASCII，检查是否有二进制数据
+                        f.seek(80)
+                        num_test = struct.unpack('<I', f.read(4))[0]
+                        # 如果数字太大，可能是 ASCII
+                        if num_test > 10000000:
+                            f.seek(0)
+                            return StepToStlConverter._read_stl_ascii(f.read().decode('ascii', errors='ignore'))
+                except:
+                    pass
+                
+                # 二进制格式
+                f.seek(80)
+                num_triangles = struct.unpack('<I', f.read(4))[0]
+                
+                if num_triangles == 0 or num_triangles > 50000000:
+                    return None, None
+                
+                vertices = []
+                
+                for _ in range(num_triangles):
+                    # 跳过法线
+                    f.read(12)
+                    
+                    # 读取三个顶点
+                    for _ in range(3):
+                        vertex = struct.unpack('<3f', f.read(12))
+                        vertices.append(vertex)
+                    
+                    # 跳过属性字节
+                    f.read(2)
+                
+                vertices = np.array(vertices, dtype=np.float32)
+                faces = np.arange(len(vertices)).reshape(-1, 3)
+                
+                return vertices, faces
+                
+        except Exception as e:
+            print(f"[DEBUG] STL读取失败: {e}")
+            return None, None
+
+    @staticmethod
+    def _read_stl_ascii(content):
+        """读取 ASCII STL"""
+        import re
+        import numpy as np
+        
+        vertices = []
+        vertex_pattern = r'vertex\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)'
+        
+        for match in re.finditer(vertex_pattern, content):
+            vertices.append([float(match.group(1)), float(match.group(2)), float(match.group(3))])
+        
+        if not vertices:
+            return None, None
+        
+        vertices = np.array(vertices, dtype=np.float32)
+        faces = np.arange(len(vertices)).reshape(-1, 3)
+        
+        return vertices, faces
+
     
     def compress_file(self, file_path: Path) -> Optional[Path]: 
         """ 
@@ -915,22 +1234,39 @@ class StepToStlConverter:
             import gc
             gc.collect()
     
-    def _convert_parts_only(self, input_file: Path, output_file: Path,
-                           ascii_mode: bool, optimize: bool,
-                           export_glb: bool) -> bool:
+    
+    def _convert_parts_only(self, input_file: Path, output_file: Path, 
+                       ascii_mode: bool, optimize: bool, 
+                       export_glb: bool) -> bool:
         """
         只转换部件（拆分装配体）
-        
-        Returns:
-            bool: 是否成功
+        🔧 简化版：文件已存在时直接覆盖
         """
+        import gc
+        
+        # 🔧 增加文件句柄限制（跨平台）
+        try:
+            if sys.platform != 'win32':
+                import resource
+                soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+                new_limit = min(hard, 8192)
+                resource.setrlimit(resource.RLIMIT_NOFILE, (new_limit, hard))
+                print(f"🔧 [系统] 文件句柄限制: {soft} → {new_limit}")
+            else:
+                try:
+                    import win32file
+                    print(f"🔧 [系统] Windows 文件句柄: 默认")
+                except ImportError:
+                    pass
+        except Exception as e:
+            print(f"⚠️  [系统] 无法调整文件句柄限制: {e}")
+        
         try:
             # 1. 提取部件
             components = self.extract_assembly_components(str(input_file))
             
             if not components:
                 print("⚠️  未找到部件，尝试作为单一模型处理", file=sys.stderr)
-                # 作为单一模型读取
                 step_reader = STEPControl_Reader()
                 status = step_reader.ReadFile(str(input_file))
                 if status == IFSelect_RetDone:
@@ -956,12 +1292,34 @@ class StepToStlConverter:
             success_count = 0
             failed_count = 0
             
+            # 🔧 批量 GC 设置（避免文件句柄耗尽）
+            BATCH_SIZE = 50
+            
+            # 🔧 用于检测文件名冲突的集合（防止大小写不敏感的文件系统问题）
+            used_filenames = set()
+            
+            # 🔧 收集生成的文件路径（用于后续压缩）
+            stl_files = []
+            glb_files = []
+            
             # 3. 逐个转换部件
             for idx, (shape, name, color) in enumerate(components, 1):
                 print(f"\n--- 部件 [{idx}/{len(components)}]: {name} ---")
                 
-                # 生成STL
-                stl_part_path = temp_dir_stl / f"{name}.stl"
+                # 🔧 防止文件名冲突（文件系统可能不区分大小写）
+                original_name = name
+                counter = 1
+                safe_name = name
+                
+                # 只检查集合，不检查文件是否存在（允许覆盖）
+                while safe_name.lower() in used_filenames:
+                    safe_name = f"{original_name}_dup{counter}"
+                    counter += 1
+                
+                used_filenames.add(safe_name.lower())
+                
+                # 生成STL（使用安全的文件名，直接覆盖已存在文件）
+                stl_part_path = temp_dir_stl / f"{safe_name}.stl"
                 print(f"📄 生成STL: {stl_part_path.name}...", end='', flush=True)
                 
                 if self.convert_shape_to_stl(shape, stl_part_path, ascii_mode):
@@ -969,38 +1327,76 @@ class StepToStlConverter:
                     part_size = stl_part_path.stat().st_size / (1024 * 1024)
                     print(f"   大小: {part_size:.2f} MB")
                     
-                    # 优化STL
-                    if optimize:
-                        optimized = self.optimize_stl(stl_part_path)
-                        if optimized:
-                            stl_part_path = optimized
+                    stl_files.append(stl_part_path)
                     
-                    # 生成GLB
+                    # 🔧 GLB 也延后处理
                     if export_glb and temp_dir_glb:
-                        glb_part_path = temp_dir_glb / f"{name}.glb"
-                        self.export_glb(stl_part_path, glb_part_path, color)
+                        glb_files.append((stl_part_path, temp_dir_glb / f"{safe_name}.glb", color))
                     
                     success_count += 1
                 else:
                     print(" ❌")
                     failed_count += 1
+                
+                # 🔧 批量释放资源
+                if idx % BATCH_SIZE == 0:
+                    gc.collect()
+                    print(f"   🔄 内存清理 ({idx}/{len(components)})")
             
-            print(f"\n📊 部件转换完成: 成功 {success_count}, 失败 {failed_count}")
+            print(f"\n📊 STL转换完成: 成功 {success_count}, 失败 {failed_count}")
             
-            # 4. 压缩STL部件目录
+            # 🔧 强制 GC
+            gc.collect()
+            
+            # 🔧 4. 批量生成 GLB（单独阶段，避免文件句柄问题）
+            if export_glb and glb_files:
+                print(f"\n📦 开始生成 {len(glb_files)} 个 GLB 文件...")
+                glb_success = 0
+                
+                for idx, (stl_path, glb_path, color) in enumerate(glb_files, 1):
+                    try:
+                        result = self.export_glb(stl_path, glb_path, color)
+                        if result:
+                            glb_success += 1
+                    except Exception as e:
+                        print(f"   ⚠️  GLB失败 {glb_path.name}: {e}")
+                    
+                    # 批量 GC
+                    if idx % BATCH_SIZE == 0:
+                        gc.collect()
+                
+                print(f"📊 GLB转换完成: 成功 {glb_success}/{len(glb_files)}")
+            
+            # 🔧 强制 GC + 等待
+            gc.collect()
+            import time
+            time.sleep(0.5)
+            
+            # 5. 压缩目录
+            print(f"\n🗜️  开始压缩...")
+            
             zip_stl = output_file.parent / f"{output_file.stem}_parts.zip"
-            print()
-            self.compress_directory(temp_dir_stl, zip_stl)
-            
-            # 5. 压缩GLB部件目录
             zip_glb = None
+            
+            # 🔧 使用改进的压缩方法
+            if self._safe_compress_directory(temp_dir_stl, zip_stl):
+                print(f"   ✓ STL压缩完成: {zip_stl.name}")
+            else:
+                print(f"   ⚠️  STL压缩失败")
+            
             if export_glb and temp_dir_glb:
                 zip_glb = output_file.parent / f"{output_file.stem}_parts_glb.zip"
-                print()
-                self.compress_directory(temp_dir_glb, zip_glb)
+                if self._safe_compress_directory(temp_dir_glb, zip_glb):
+                    print(f"   ✓ GLB压缩完成: {zip_glb.name}")
+                else:
+                    print(f"   ⚠️  GLB压缩失败")
             
             # 6. 删除临时目录
             print(f"\n🧹 清理临时文件...", end='', flush=True)
+            
+            gc.collect()
+            time.sleep(0.5)
+            
             shutil.rmtree(temp_dir_stl, ignore_errors=True)
             if temp_dir_glb:
                 shutil.rmtree(temp_dir_glb, ignore_errors=True)
@@ -1017,7 +1413,7 @@ class StepToStlConverter:
             
             if zip_glb and zip_glb.exists():
                 zip_glb_size = zip_glb.stat().st_size / (1024 * 1024)
-                print(f"   🗜️  {zip_glb.name} ({zip_glb_size:.2f} MB, {success_count} 个GLB部件)")
+                print(f"   🗜️  {zip_glb.name} ({zip_glb_size:.2f} MB)")
             
             print(f"{'='*70}\n")
             
@@ -1028,6 +1424,64 @@ class StepToStlConverter:
             import traceback
             traceback.print_exc(file=sys.stderr)
             return False
+
+    def _safe_compress_directory(self, dir_path: Path, zip_path: Path) -> bool:
+        """
+        🔧 安全压缩目录（避免文件句柄问题）
+        """
+        import gc
+        
+        try:
+            # 强制 GC
+            gc.collect()
+            
+            # 获取文件列表
+            files = list(dir_path.rglob('*'))
+            files = [f for f in files if f.is_file()]
+            
+            if not files:
+                print(f"   ⚠️  目录为空: {dir_path}")
+                return False
+            
+            total_size = sum(f.stat().st_size for f in files)
+            total_size_mb = total_size / (1024 * 1024)
+            
+            print(f"   📁 {len(files)} 个文件, 总计 {total_size_mb:.2f} MB")
+            
+            # 🔧 方法1：使用 with 语句确保正确关闭
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as zipf:
+                for file in files:
+                    arcname = file.relative_to(dir_path)
+                    # 🔧 读取文件内容再写入，避免保持文件句柄
+                    with open(file, 'rb') as f:
+                        data = f.read()
+                    zipf.writestr(str(arcname), data)
+            
+            compressed_size = zip_path.stat().st_size / (1024 * 1024)
+            ratio = (1 - compressed_size / total_size_mb) * 100 if total_size_mb > 0 else 0
+            
+            print(f"   ✓ 压缩完成: {compressed_size:.2f} MB (↓{ratio:.1f}%)")
+            return True
+            
+        except Exception as e:
+            print(f"   ❌ 压缩失败: {e}")
+            
+            # 🔧 方法2：回退到简单方式
+            try:
+                gc.collect()
+                import time
+                time.sleep(1)
+                
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED) as zipf:  # 不压缩
+                    for file in dir_path.rglob('*'):
+                        if file.is_file():
+                            zipf.write(file, file.relative_to(dir_path))
+                
+                print(f"   ✓ 回退压缩完成（无压缩）")
+                return True
+            except Exception as e2:
+                print(f"   ❌ 回退也失败: {e2}")
+                return False
     
     def convert_directory(self, input_dir: str, output_dir: Optional[str] = None, 
                          ascii_mode=False, optimize=False, export_glb=False, 

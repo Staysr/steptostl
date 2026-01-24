@@ -49,6 +49,7 @@ jobs:
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_WIN }} "numpy<2.0" libpython ucrt vs2015_runtime
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh==3.23.5
+        pip install scipy
         pip install "jaraco.text>=3.0" "jaraco.functools>=3.5.0" "jaraco.context>=4.0"
 
     - name: Create Runtime Hooks
@@ -132,6 +133,7 @@ jobs:
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh
+        pip install scipy
     - name: Create Dummy Hook
       shell: bash -el {0}
       run: |
@@ -179,6 +181,7 @@ jobs:
         conda install -y -c conda-forge pythonocc-core=${{ env.OCC_VERSION_MAC }}
         pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
         pip install trimesh
+        pip install scipy
     - name: Create Dummy Hook
       shell: bash -el {0}
       run: |
