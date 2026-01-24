@@ -2,11 +2,11 @@ name: Build Multi-Platform
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, identify_parts ]
     tags:
       - 'v*'
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, identify_parts]
   workflow_dispatch:
 
 env:
