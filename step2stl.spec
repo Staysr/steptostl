@@ -1,209 +1,151 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-step2stl PyInstaller Build Configuration (Win7 FINAL FIX)
+PyInstaller spec file for step2stl (cadquery-ocp/OCP version)
+输出: step2stl 文件夹，包含 step2stl.exe 和 _internal 目录
 """
 
 import sys
 import os
-import glob
-from PyInstaller.utils.hooks import collect_all, collect_submodules
 
-# ==========================================
-# 1. Helper Functions
-# ==========================================
-def _safe_print(msg):
-    try:
-        print(msg)
-    except:
-        pass
+# =========================================================
+#                    配置区域
+# =========================================================
 
-def sanitize_imports(raw_list):
-    clean = []
-    if not raw_list: return clean
-    for item in raw_list:
-        if item and isinstance(item, str):
-            clean.append(item)
-    return list(set(clean))
+# 你的脚本文件名
+SCRIPT_NAME = 'step2stl_win7.py'
 
-def sanitize_tuples(raw_list):
-    clean = []
-    if not raw_list: return clean
-    for item in raw_list:
-        if isinstance(item, tuple) and len(item) == 2:
-            if isinstance(item[0], str) and isinstance(item[1], str):
-                clean.append(item)
-    return list(set(clean))
+# 生成的可执行文件名
+EXE_NAME = 'step2stl'
 
-_safe_print("=" * 70)
-_safe_print("step2stl Build Config (Win7 PATH FIX)")
-_safe_print("=" * 70)
+# 打包模式：False = 文件夹模式 (生成 _internal 目录)
+BUILD_MODE_ONEFILE = False
 
-# ==========================================
-# 2. Environment
-# ==========================================
-conda_prefix = os.environ.get('CONDA_PREFIX')
-if not conda_prefix:
-    try:
-        if 'conda' in sys.executable.lower():
-            conda_prefix = os.path.dirname(os.path.dirname(sys.executable))
-    except:
-        pass
+# 是否使用 UPX 压缩
+USE_UPX = False
 
-# ==========================================
-# 3. Init
-# ==========================================
-hiddenimports = []
-datas = []
-binaries = []
-pathex = []
+# =========================================================
+#                      打包逻辑
+# =========================================================
 
-# ==========================================
-# 4. Critical DLL Collection
-# ==========================================
-if sys.platform == 'win32' and conda_prefix:
-    lib_bin = os.path.join(conda_prefix, 'Library', 'bin')
-    conda_bin = os.path.join(conda_prefix, 'bin')
-    
-    # 将可能的路径都加上
-    search_dirs = [lib_bin, conda_bin]
-    
-    for d in search_dirs:
-        if os.path.exists(d):
-            pathex.append(d)
-    
-    _safe_print("\n[Collecting Critical DLLs]")
-    
-    # 针对 Win7 的全量 DLL 收集
-    # 注意：这里我们增加了 d3dcompiler (Direct3D) 和 opengl，防止图形库报错
-    dll_patterns = [
-        'TK*.dll',         # OCC Core
-        'tbb*.dll',        # TBB
-        'freeimage*.dll',  # FreeImage
-        'freetype*.dll',   # Freetype
-        'gl*.dll', 'opengl*.dll', # OpenGL
-        'd3dcompiler*.dll', # Direct3D (Win7 sometimes lacks this)
-        'mkl_*.dll', 'libopenblas*.dll', 'libiomp5md.dll', # Numpy
-        'api-ms-win-*.dll', # UCRT Forwarders
-        'ucrtbase.dll',
-        'vcruntime*.dll',
-        'msvcp*.dll',
-        'concrt*.dll',
-        'zlib*.dll',
-        'sqlite3.dll'
-    ]
-    
-    count = 0
-    for s_dir in search_dirs:
-        if not os.path.exists(s_dir): continue
-        
-        for pattern in dll_patterns:
-            found = glob.glob(os.path.join(s_dir, pattern))
-            for dll in found:
-                # 排除 debug DLL
-                if dll.lower().endswith('d.dll') and not dll.lower().endswith('bnd.dll'):
-                    continue
-                # 排除 python3.dll (防止冲突)
-                if 'python3.dll' in dll.lower():
-                    continue
-                    
-                binaries.append((dll, '.'))
-                count += 1
-
-    _safe_print(f"  Collected {count} DLLs for bundling.")
-
-# ==========================================
-# 5. Collect Python Dependencies
-# ==========================================
-# Numpy
-try:
-    np_hidden, np_bin, np_data = collect_all('numpy')
-    if np_hidden: hiddenimports.extend(np_hidden)
-    if np_bin: binaries.extend(np_bin)
-    if np_data: datas.extend(np_data)
-except:
-    hiddenimports.extend(['numpy', 'numpy.core', 'numpy._core'])
-
-# Jaraco
-try:
-    j_hidden, j_bin, j_data = collect_all('jaraco')
-    if j_hidden: hiddenimports.extend(j_hidden)
-    if j_data: datas.extend(j_data)
-except:
-    hiddenimports.extend(['jaraco.text', 'jaraco.functools', 'jaraco.context'])
-
-# Trimesh
-try:
-    tm_hidden = collect_submodules('trimesh')
-    if tm_hidden: hiddenimports.extend(tm_hidden)
-except:
-    hiddenimports.append('trimesh')
-
-# OCC
-hiddenimports.extend([
-    'OCC', 'OCC.Core',
-    'OCC.Core.STEPControl', 'OCC.Core.StlAPI', 'OCC.Core.BRepMesh',
-    'OCC.Core.IFSelect', 'OCC.Core.Bnd', 'OCC.Core.BRepBndLib',
-    'OCC.Core.TCollection', 'OCC.Core.Standard', 'OCC.Core.TopoDS',
-    'OCC.Core.Wrappers' # 可能会用到
-])
-
-# Misc
-hiddenimports.extend([
-    'ipaddress', 'urllib', 'urllib.parse', 'pathlib', 'argparse',
-    'collections', 'collections.abc', 'warnings', 'traceback',
-    'shutil', 'tempfile', 'copy', 'zipfile', 'ctypes', 'typing', 'sys', 'os'
-])
-
-# ==========================================
-# 6. Sanitize
-# ==========================================
-hiddenimports = sanitize_imports(hiddenimports)
-binaries = sanitize_tuples(binaries)
-datas = sanitize_tuples(datas)
-
-# ==========================================
-# 7. Analysis
-# ==========================================
 block_cipher = None
 
+# OCP 相关的隐藏导入 (根据你的代码使用情况)
+ocp_hidden_imports = [
+    'OCP',
+    'OCP.STEPCAFControl',
+    'OCP.StlAPI',
+    'OCP.BRepMesh',
+    'OCP.IFSelect',
+    'OCP.Bnd',
+    'OCP.BRepBndLib',
+    'OCP.TDocStd',
+    'OCP.XCAFApp',
+    'OCP.TCollection',
+    'OCP.XCAFDoc',
+    'OCP.TDF',
+    'OCP.TDataStd',
+    'OCP.TopAbs',
+    'OCP.TopoDS',
+    'OCP.TopExp',
+    'OCP.RWGltf',
+    'OCP.TColStd',
+    'OCP.Message',
+    'OCP.gp',
+    'OCP.BRep',
+    'OCP.BRepBuilderAPI',
+    'OCP.Geom',
+    'OCP.GeomAbs',
+    'OCP.Standard',
+    'OCP.Quantity',
+]
+
+# 运行时钩子
+runtime_hooks_list = []
+if os.path.exists('rthook_win7.py'):
+    runtime_hooks_list.append('rthook_win7.py')
+if os.path.exists('rthook_encoding.py'):
+    runtime_hooks_list.append('rthook_encoding.py')
+
+# hook 目录 (如果有 hook-OCC.py)
+hooks_path = []
+if os.path.exists('hook-OCC.py'):
+    hooks_path = ['.']
+
+# 1. 分析依赖
 a = Analysis(
-    ['step2stl.py'],
-    pathex=pathex,
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
-    hookspath=['./hooks'],
+    [SCRIPT_NAME],
+    pathex=[],
+    binaries=[],
+    datas=[],
+    hiddenimports=ocp_hidden_imports,
+    hookspath=hooks_path,
     hooksconfig={},
-    # 关键修改：同时加载 Win7 路径修复钩子 和 编码修复钩子
-    runtime_hooks=['./rthook_win7.py', './rthook_encoding.py'],
-    excludes=['tkinter', 'PyQt5', 'PyQt6', 'matplotlib', 'scipy', 'pytest', 'IPython', 'numpy.f2py.tests'],
+    runtime_hooks=runtime_hooks_list,
+    excludes=[
+        'tkinter', 'test', 'unittest', 'email', 'http',
+        'xmlrpc', 'html', 'pydoc', 'pdb', 'distutils',
+        'matplotlib', 'scipy', 'PIL', 'IPython', 'jupyter',
+        'PyQt5', 'PyQt6', 'PySide2', 'PySide6', 'wx',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
 )
 
-a.scripts = [s for s in a.scripts if 'pyi_rth_pkgres' not in s[1]]
-
+# 2. 压缩 Python 字节码
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name='step2stl',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False, 
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=True,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-)
+# 3. 根据模式构建
+if BUILD_MODE_ONEFILE:
+    # --- 单文件模式 (OneFile) ---
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        [],
+        name=EXE_NAME,
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=USE_UPX,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=True,
+        disable_windowed_traceback=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+    )
+else:
+    # --- 文件夹模式 (OneDir) - 生成 _internal 结构 ---
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name=EXE_NAME,
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=USE_UPX,
+        console=True,
+        disable_windowed_traceback=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+    )
+
+    # 收集到文件夹 (名称为 step2stl)
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=USE_UPX,
+        upx_exclude=[],
+        name=EXE_NAME,  # 生成的文件夹名字：step2stl
+    )
