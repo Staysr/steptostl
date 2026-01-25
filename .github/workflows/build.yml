@@ -46,26 +46,46 @@ jobs:
     - name: Install dependencies
       shell: bash -el {0}
       run: |
+        # 1. 安装 Conda 依赖 (包含那个元数据损坏的 vtk)
         conda install -y -c conda-forge pythonocc-core=7.5.1 "numpy<2.0" libpython ucrt vs2015_runtime
         
         # =======================================================
-        # 🔧 [精准外科手术]：使用 Python 脚本强制删除损坏的元数据
-        # 解决 pip Invalid version: '-PKG-VERSION' 错误
+        # 🔧 [修复]：创建临时 Python 脚本来清理损坏的元数据
+        # 使用文件方式避免命令行语法错误
         # =======================================================
-        python -c "import os, glob, shutil, sys; \
+        cat > clean_vtk.py <<EOF
+        import os
+        import glob
+        import shutil
+        import sys
+        
         # 找到 site-packages 目录
-        site_packages = next(p for p in sys.path if 'site-packages' in p); \
-        print(f'Target site-packages: {site_packages}'); \
-        # 查找所有 vtk 开头的元数据文件夹
-        patterns = ['vtk-*.dist-info', 'vtk-*.egg-info']; \
-        found = []; \
-        for p in patterns: \
-            found.extend(glob.glob(os.path.join(site_packages, p))); \
-        # 执行删除
-        for path in found: \
-            print(f'🔥🔥 DELETING CORRUPT METADATA: {path}'); \
-            try: shutil.rmtree(path) \
-            except Exception as e: print(f'Error deleting {path}: {e}')"
+        try:
+            site_packages = next(p for p in sys.path if 'site-packages' in p)
+            print(f"Target site-packages: {site_packages}")
+            
+            # 查找所有 vtk 开头的元数据文件夹
+            patterns = ['vtk-*.dist-info', 'vtk-*.egg-info']
+            found = []
+            for p in patterns:
+                found.extend(glob.glob(os.path.join(site_packages, p)))
+            
+            # 执行删除
+            if not found:
+                print("No corrupt VTK metadata found. Skipping.")
+            
+            for path in found:
+                print(f"🔥🔥 DELETING CORRUPT METADATA: {path}")
+                try:
+                    shutil.rmtree(path)
+                except Exception as e:
+                    print(f"Error deleting {path}: {e}")
+        except StopIteration:
+            print("Could not find site-packages directory.")
+        EOF
+        
+        # 运行清理脚本
+        python clean_vtk.py
         
         # =======================================================
         # 3. 现在环境干净了，可以安全运行 pip 了
