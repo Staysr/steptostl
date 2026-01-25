@@ -2,285 +2,265 @@ name: Build Multi-Platform
 
 on:
   push:
-    branches: [ main, master, cadquery-ocp ]
+    branches:
+      - main
+      - master
+      - cadquery-ocp
     tags:
       - 'v*'
   pull_request:
-    branches: [ main, master, cadquery-ocp ]
+    branches:
+      - main
+      - master
+      - cadquery-ocp
   workflow_dispatch:
 
 env:
-  # Windows 7 兼容配置 - Python 3.8 + OCP 7.5.3
   PYTHON_WIN: "3.8"
   OCP_VERSION_WIN: "7.5.3.0"
-
-  # macOS 配置 - Python 3.9 + OCP 7.7.2
   PYTHON_MAC: "3.9"
   OCP_VERSION_MAC: "7.7.2"
-
   PYINSTALLER_VERSION: "6.9.0"
   PYTHONIOENCODING: "utf-8"
   PYTHONUTF8: "1"
 
 jobs:
-  # ==========================================
-  # Windows x64 构建 (Win7 兼容)
-  # ==========================================
   build-windows-x64:
     runs-on: windows-2019
-
     env:
       PYTHONIOENCODING: utf-8
       PYTHONUTF8: 1
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup Miniconda
-      uses: conda-incubator/setup-miniconda@v3
-      with:
-        auto-update-conda: true
-        python-version: ${{ env.PYTHON_WIN }}
-        architecture: x64
-        channels: conda-forge,defaults
-        channel-priority: strict
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: ${{ env.PYTHON_WIN }}
+          architecture: x64
+          channels: conda-forge,defaults
+          channel-priority: strict
 
-    - name: Install dependencies
-      shell: bash -el {0}
-      run: |
-        echo "===== Installing Dependencies ====="
-        echo "Python version:"
-        python --version
-        
-        # 使用 conda 安装 OCP 7.5.3.0 (来自 conda-forge)
-        echo "Installing OCP from conda-forge..."
-        conda install -y -c conda-forge ocp=${{ env.OCP_VERSION_WIN }}
-        
-        # 安装其他依赖
-        pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
-        pip install trimesh==3.23.5
-        pip install "numpy<2.0"
-        
-        # 验证安装
-        echo "===== Verifying OCP Installation ====="
-        python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
-        python -c "from OCP.StlAPI import StlAPI_Writer; print('StlAPI import OK')"
+      - name: Install dependencies
+        shell: bash -el {0}
+        run: |
+          echo "===== Installing Dependencies ====="
+          echo "Python version:"
+          python --version
+          
+          echo "Installing OCP from conda-forge..."
+          conda install -y -c conda-forge ocp=${{ env.OCP_VERSION_WIN }}
+          
+          pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
+          pip install trimesh==3.23.5
+          pip install "numpy<2.0"
+          
+          echo "===== Verifying OCP Installation ====="
+          python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
+          python -c "from OCP.StlAPI import StlAPI_Writer; print('StlAPI import OK')"
 
-    # [关键步骤 1] 创建 Win7 路径修复钩子
-    - name: Create Win7 PATH Hook
-      shell: bash -el {0}
-      run: |
-        echo "Creating Win7 PATH fixer..."
-        cat > rthook_win7.py << 'EOF'
-import os
-import sys
-try:
-    if hasattr(sys, '_MEIPASS'):
-        base_path = sys._MEIPASS
-    else:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-    os.environ['PATH'] = base_path + ';' + os.environ.get('PATH', '')
-except Exception:
-    pass
-EOF
+      - name: Create Win7 PATH Hook
+        shell: bash -el {0}
+        run: |
+          echo "Creating Win7 PATH fixer..."
+          cat > rthook_win7.py << 'HOOK_EOF'
+          import os
+          import sys
+          try:
+              if hasattr(sys, '_MEIPASS'):
+                  base_path = sys._MEIPASS
+              else:
+                  base_path = os.path.dirname(os.path.abspath(__file__))
+              os.environ['PATH'] = base_path + ';' + os.environ.get('PATH', '')
+          except Exception:
+              pass
+          HOOK_EOF
 
-    # [关键步骤 2] 创建中文编码修复钩子
-    - name: Create Encoding Hook
-      shell: bash -el {0}
-      run: |
-        cat > rthook_encoding.py << 'EOF'
-import sys
-import io
-try:
-    if sys.stdout and sys.stdout.encoding != 'utf-8':
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    if sys.stderr and sys.stderr.encoding != 'utf-8':
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-except Exception:
-    pass
-EOF
+      - name: Create Encoding Hook
+        shell: bash -el {0}
+        run: |
+          cat > rthook_encoding.py << 'HOOK_EOF'
+          import sys
+          import io
+          try:
+              if sys.stdout and sys.stdout.encoding != 'utf-8':
+                  sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+              if sys.stderr and sys.stderr.encoding != 'utf-8':
+                  sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+          except Exception:
+              pass
+          HOOK_EOF
 
-    - name: Build EXE
-      shell: bash -el {0}
-      run: |
-        echo "===== Starting Build ====="
-        ls -lh rthook_*.py
-        
-        # 检查 hook-OCC.py 是否存在
-        if [ -f "hook-OCC.py" ]; then
-          echo "hook-OCC.py found"
-          ls -lh hook-OCC.py
-        fi
-        
-        # 执行打包
-        pyinstaller --log-level=INFO step2stl.spec
-        
-        echo "===== Build Output ====="
-        ls -lh dist/
-        ls -lh dist/step2stl/ || true
+      - name: Build EXE
+        shell: bash -el {0}
+        run: |
+          echo "===== Starting Build ====="
+          ls -lh rthook_*.py
+          
+          if [ -f "hook-OCC.py" ]; then
+            echo "hook-OCC.py found"
+            ls -lh hook-OCC.py
+          fi
+          
+          pyinstaller --log-level=INFO step2stl.spec
+          
+          echo "===== Build Output ====="
+          ls -lh dist/
+          ls -lh dist/step2stl/ || true
 
-    - name: Test executable
-      shell: bash -el {0}
-      env:
-        PYTHONUTF8: 1
-      run: |
-        echo "===== Testing Executable ====="
-        ./dist/step2stl/step2stl.exe --help || echo "Help test completed"
+      - name: Test executable
+        shell: bash -el {0}
+        env:
+          PYTHONUTF8: 1
+        run: |
+          echo "===== Testing Executable ====="
+          ./dist/step2stl/step2stl.exe --help || echo "Help test completed"
 
-    - name: Pack Windows ZIP
-      shell: bash -el {0}
-      run: |
-        cd dist
-        7z a -tzip step2stl-windows-x64.zip step2stl/
+      - name: Pack Windows ZIP
+        shell: bash -el {0}
+        run: |
+          cd dist
+          7z a -tzip step2stl-windows-x64.zip step2stl/
 
-    - name: Upload Windows Folder
-      uses: actions/upload-artifact@v4
-      with:
-        name: step2stl-windows-x64
-        path: dist/step2stl/
+      - name: Upload Windows Folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: step2stl-windows-x64
+          path: dist/step2stl/
 
-    - name: Upload Windows ZIP
-      uses: actions/upload-artifact@v4
-      with:
-        name: step2stl-windows-x64-zip
-        path: dist/step2stl-windows-x64.zip
+      - name: Upload Windows ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: step2stl-windows-x64-zip
+          path: dist/step2stl-windows-x64.zip
 
-  # ==========================================
-  # macOS ARM64 构建 (Apple Silicon)
-  # ==========================================
   build-macos-arm64:
     runs-on: macos-14
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup Miniconda
-      uses: conda-incubator/setup-miniconda@v3
-      with:
-        auto-update-conda: true
-        python-version: ${{ env.PYTHON_MAC }}
-        architecture: arm64
-        channels: conda-forge,defaults
-        channel-priority: strict
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: ${{ env.PYTHON_MAC }}
+          architecture: arm64
+          channels: conda-forge,defaults
+          channel-priority: strict
 
-    - name: Install dependencies
-      shell: bash -el {0}
-      run: |
-        echo "===== Installing Dependencies ====="
-        python --version
-        
-        # 使用 conda 安装 OCP (macOS ARM64)
-        echo "Installing OCP from conda-forge..."
-        conda install -y -c conda-forge ocp>=${{ env.OCP_VERSION_MAC }}
-        
-        pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
-        pip install trimesh
-        pip install numpy
-        
-        # 验证安装
-        echo "===== Verifying OCP Installation ====="
-        python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
+      - name: Install dependencies
+        shell: bash -el {0}
+        run: |
+          echo "===== Installing Dependencies ====="
+          python --version
+          
+          echo "Installing OCP from conda-forge..."
+          conda install -y -c conda-forge ocp>=${{ env.OCP_VERSION_MAC }}
+          
+          pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
+          pip install trimesh
+          pip install numpy
+          
+          echo "===== Verifying OCP Installation ====="
+          python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
 
-    - name: Create Dummy Hooks
-      shell: bash -el {0}
-      run: |
-        # macOS 不需要这些钩子，但 spec 文件会检查它们
-        touch rthook_encoding.py
-        touch rthook_win7.py
+      - name: Create Dummy Hooks
+        shell: bash -el {0}
+        run: |
+          touch rthook_encoding.py
+          touch rthook_win7.py
 
-    - name: Build Binary
-      shell: bash -el {0}
-      run: |
-        pyinstaller --log-level=INFO step2stl.spec
-        ls -lh dist/
-        ls -lh dist/step2stl/ || true
+      - name: Build Binary
+        shell: bash -el {0}
+        run: |
+          pyinstaller --log-level=INFO step2stl.spec
+          ls -lh dist/
+          ls -lh dist/step2stl/ || true
 
-    - name: Test executable
-      shell: bash -el {0}
-      run: |
-        chmod +x dist/step2stl/step2stl
-        ./dist/step2stl/step2stl --help || echo "Help test completed"
-      continue-on-error: true
+      - name: Test executable
+        shell: bash -el {0}
+        run: |
+          chmod +x dist/step2stl/step2stl
+          ./dist/step2stl/step2stl --help || echo "Help test completed"
+        continue-on-error: true
 
-    - name: Pack macOS ZIP
-      shell: bash -el {0}
-      run: |
-        cd dist
-        zip -r -9 step2stl-macos-arm64.zip step2stl/
+      - name: Pack macOS ZIP
+        shell: bash -el {0}
+        run: |
+          cd dist
+          zip -r -9 step2stl-macos-arm64.zip step2stl/
 
-    - name: Upload macOS ARM64
-      uses: actions/upload-artifact@v4
-      with:
-        name: step2stl-macos-arm64-zip
-        path: dist/step2stl-macos-arm64.zip
+      - name: Upload macOS ARM64
+        uses: actions/upload-artifact@v4
+        with:
+          name: step2stl-macos-arm64-zip
+          path: dist/step2stl-macos-arm64.zip
 
-  # ==========================================
-  # macOS Intel x64 构建
-  # ==========================================
   build-macos-x64:
     runs-on: macos-13
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup Miniconda
-      uses: conda-incubator/setup-miniconda@v3
-      with:
-        auto-update-conda: true
-        python-version: ${{ env.PYTHON_MAC }}
-        architecture: x64
-        channels: conda-forge,defaults
-        channel-priority: strict
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: ${{ env.PYTHON_MAC }}
+          architecture: x64
+          channels: conda-forge,defaults
+          channel-priority: strict
 
-    - name: Install dependencies
-      shell: bash -el {0}
-      run: |
-        echo "===== Installing Dependencies ====="
-        python --version
-        
-        # 使用 conda 安装 OCP (macOS x64)
-        echo "Installing OCP from conda-forge..."
-        conda install -y -c conda-forge ocp>=${{ env.OCP_VERSION_MAC }}
-        
-        pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
-        pip install trimesh
-        pip install numpy
-        
-        # 验证安装
-        echo "===== Verifying OCP Installation ====="
-        python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
+      - name: Install dependencies
+        shell: bash -el {0}
+        run: |
+          echo "===== Installing Dependencies ====="
+          python --version
+          
+          echo "Installing OCP from conda-forge..."
+          conda install -y -c conda-forge ocp>=${{ env.OCP_VERSION_MAC }}
+          
+          pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
+          pip install trimesh
+          pip install numpy
+          
+          echo "===== Verifying OCP Installation ====="
+          python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
 
-    - name: Create Dummy Hooks
-      shell: bash -el {0}
-      run: |
-        touch rthook_encoding.py
-        touch rthook_win7.py
+      - name: Create Dummy Hooks
+        shell: bash -el {0}
+        run: |
+          touch rthook_encoding.py
+          touch rthook_win7.py
 
-    - name: Build Binary
-      shell: bash -el {0}
-      run: |
-        pyinstaller --log-level=INFO step2stl.spec
-        ls -lh dist/
-        ls -lh dist/step2stl/ || true
+      - name: Build Binary
+        shell: bash -el {0}
+        run: |
+          pyinstaller --log-level=INFO step2stl.spec
+          ls -lh dist/
+          ls -lh dist/step2stl/ || true
 
-    - name: Test executable
-      shell: bash -el {0}
-      run: |
-        chmod +x dist/step2stl/step2stl
-        ./dist/step2stl/step2stl --help || echo "Help test completed"
-      continue-on-error: true
+      - name: Test executable
+        shell: bash -el {0}
+        run: |
+          chmod +x dist/step2stl/step2stl
+          ./dist/step2stl/step2stl --help || echo "Help test completed"
+        continue-on-error: true
 
-    - name: Pack macOS ZIP
-      shell: bash -el {0}
-      run: |
-        cd dist
-        zip -r -9 step2stl-macos-x64.zip step2stl/
+      - name: Pack macOS ZIP
+        shell: bash -el {0}
+        run: |
+          cd dist
+          zip -r -9 step2stl-macos-x64.zip step2stl/
 
-    - name: Upload macOS x64
-      uses: actions/upload-artifact@v4
-      with:
-        name: step2stl-macos-x64-zip
-        path: dist/step2stl-macos-x64.zip
+      - name: Upload macOS x64
+        uses: actions/upload-artifact@v4
+        with:
+          name: step2stl-macos-x64-zip
+          path: dist/step2stl-macos-x64.zip
