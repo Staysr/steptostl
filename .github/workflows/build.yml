@@ -44,19 +44,18 @@ jobs:
           channels: conda-forge,defaults
           channel-priority: strict
 
-      - name: Install dependencies
+      - name: Install all dependencies with conda
         shell: bash -el {0}
         run: |
           echo "===== Installing Dependencies ====="
-          echo "Python version:"
           python --version
           
-          echo "Installing OCP from conda-forge..."
-          conda install -y -c conda-forge ocp=${{ env.OCP_VERSION_WIN }}
-          
-          pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
-          pip install trimesh==3.23.5
-          pip install "numpy<2.0"
+          # 使用 conda 安装所有依赖，避免 pip 版本解析问题
+          conda install -y -c conda-forge \
+            ocp=${{ env.OCP_VERSION_WIN }} \
+            pyinstaller=${{ env.PYINSTALLER_VERSION }} \
+            trimesh \
+            "numpy<2.0"
           
           echo "===== Verifying OCP Installation ====="
           python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
@@ -153,18 +152,17 @@ jobs:
           channels: conda-forge,defaults
           channel-priority: strict
 
-      - name: Install dependencies
+      - name: Install all dependencies with conda
         shell: bash -el {0}
         run: |
           echo "===== Installing Dependencies ====="
           python --version
           
-          echo "Installing OCP from conda-forge..."
-          conda install -y -c conda-forge ocp>=${{ env.OCP_VERSION_MAC }}
-          
-          pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
-          pip install trimesh
-          pip install numpy
+          conda install -y -c conda-forge \
+            ocp>=${{ env.OCP_VERSION_MAC }} \
+            pyinstaller=${{ env.PYINSTALLER_VERSION }} \
+            trimesh \
+            numpy
           
           echo "===== Verifying OCP Installation ====="
           python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
@@ -217,18 +215,17 @@ jobs:
           channels: conda-forge,defaults
           channel-priority: strict
 
-      - name: Install dependencies
+      - name: Install all dependencies with conda
         shell: bash -el {0}
         run: |
           echo "===== Installing Dependencies ====="
           python --version
           
-          echo "Installing OCP from conda-forge..."
-          conda install -y -c conda-forge ocp>=${{ env.OCP_VERSION_MAC }}
-          
-          pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
-          pip install trimesh
-          pip install numpy
+          conda install -y -c conda-forge \
+            ocp>=${{ env.OCP_VERSION_MAC }} \
+            pyinstaller=${{ env.PYINSTALLER_VERSION }} \
+            trimesh \
+            numpy
           
           echo "===== Verifying OCP Installation ====="
           python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
