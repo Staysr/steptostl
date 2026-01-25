@@ -47,16 +47,35 @@ jobs:
       shell: bash -el {0}
       run: |
         conda install -y -c conda-forge pythonocc-core=7.5.1 "numpy<2.0" libpython ucrt vs2015_runtime
-        echo "正在清理损坏的 VTK 元数据..."
-        rm -rf $CONDA_PREFIX/Lib/site-packages/vtk-*.dist-info
-        rm -rf $CONDA_PREFIX/Lib/site-packages/vtk-*.egg-info
-        echo "清理完成，Pip 现在应该可以正常工作了。"
+        
+        # =======================================================
+        # 🔧 [精准外科手术]：使用 Python 脚本强制删除损坏的元数据
+        # 解决 pip Invalid version: '-PKG-VERSION' 错误
+        # =======================================================
+        python -c "import os, glob, shutil, sys; \
+        # 找到 site-packages 目录
+        site_packages = next(p for p in sys.path if 'site-packages' in p); \
+        print(f'Target site-packages: {site_packages}'); \
+        # 查找所有 vtk 开头的元数据文件夹
+        patterns = ['vtk-*.dist-info', 'vtk-*.egg-info']; \
+        found = []; \
+        for p in patterns: \
+            found.extend(glob.glob(os.path.join(site_packages, p))); \
+        # 执行删除
+        for path in found: \
+            print(f'🔥🔥 DELETING CORRUPT METADATA: {path}'); \
+            try: shutil.rmtree(path) \
+            except Exception as e: print(f'Error deleting {path}: {e}')"
+        
+        # =======================================================
+        # 3. 现在环境干净了，可以安全运行 pip 了
+        # =======================================================
         python -m pip install --upgrade pip setuptools wheel
+        
         pip install pyinstaller==6.9.0
         pip install trimesh==3.23.5
         pip install scipy
         pip install "jaraco.text>=3.0" "jaraco.functools>=3.5.0" "jaraco.context>=4.0"
-
 
     - name: Create Runtime Hooks
       shell: bash -el {0}
