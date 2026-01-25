@@ -47,12 +47,16 @@ jobs:
       shell: bash -el {0}
       run: |
         conda install -y -c conda-forge pythonocc-core=7.5.1 "numpy<2.0" libpython ucrt vs2015_runtime
+        echo "正在清理损坏的 VTK 元数据..."
+        rm -rf $CONDA_PREFIX/Lib/site-packages/vtk-*.dist-info
+        rm -rf $CONDA_PREFIX/Lib/site-packages/vtk-*.egg-info
+        echo "清理完成，Pip 现在应该可以正常工作了。"
         python -m pip install --upgrade pip setuptools wheel
-
         pip install pyinstaller==6.9.0
         pip install trimesh==3.23.5
         pip install scipy
         pip install "jaraco.text>=3.0" "jaraco.functools>=3.5.0" "jaraco.context>=4.0"
+
 
     - name: Create Runtime Hooks
       shell: bash -el {0}
