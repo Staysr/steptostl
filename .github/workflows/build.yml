@@ -20,7 +20,7 @@ env:
   OCP_VERSION_WIN: "7.5.3"
   PYTHON_MAC: "3.9"
   OCP_VERSION_MAC: "7.7.2"
-  # 使用 5.13.2 以获得最佳的 Win7 兼容性
+  # 锁定 PyInstaller 版本以保证兼容性
   PYINSTALLER_VERSION: "5.13.2"
   PYTHONIOENCODING: "utf-8"
   PYTHONUTF8: "1"
@@ -45,23 +45,48 @@ jobs:
           channels: conda-forge, defaults
           channel-priority: flexible
 
-      - name: Install Dependencies
+      - name: Install OCP with Conda
         shell: bash -el {0}
         run: |
           echo "===== Installing Conda Dependencies ====="
-          # 1. 安装 OCP
           conda install -y -c conda-forge \
             ocp=${{ env.OCP_VERSION_WIN }} \
             trimesh \
             "numpy<2.0"
+
+      - name: Fix Broken VTK Metadata (Python)
+        shell: python
+        run: |
+          # === 使用 Python 脚本强制删除损坏的元数据 ===
+          import sys
+          import shutil
+          from pathlib import Path
           
-          echo "===== Fixing Broken Metadata (Windows Specific) ====="
-          # 关键步骤：OCP 7.5.3 带来的 vtk 包有错误的元数据，会导致 pip 崩溃
-          # 我们直接删除 vtk 的元数据文件夹，这样 pip 就看不到它了，也就不会报错
-          rm -rf $CONDA_PREFIX/Lib/site-packages/vtk-*.dist-info || true
+          # 获取 conda 环境下的 site-packages 路径
+          site_pkgs = Path(sys.prefix) / "Lib" / "site-packages"
+          print(f"Scanning site-packages at: {site_pkgs}")
           
-          echo "===== Installing PyInstaller via Pip ====="
-          # 2. 安装 PyInstaller (不要升级 pip，使用自带的即可)
+          # 查找所有以 vtk- 开头的 dist-info 文件夹
+          # 那个 -PKG-VERSION 错误就藏在这里面
+          targets = list(site_pkgs.glob("vtk-*.dist-info"))
+          
+          if not targets:
+              print("WARNING: No vtk metadata found. Build might fail if pip sees it later.")
+          
+          for target in targets:
+              print(f"Removing corrupted metadata folder: {target}")
+              try:
+                  shutil.rmtree(target)
+                  print("SUCCESS: Deleted.")
+              except Exception as e:
+                  print(f"ERROR: Failed to delete {target}: {e}")
+                  sys.exit(1)
+
+      - name: Install PyInstaller via Pip
+        shell: bash -el {0}
+        run: |
+          echo "===== Installing PyInstaller ====="
+          # 此时 vtk 的元数据已被删除，pip 不会再报错了
           python -m pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
           
           echo "===== Verifying Installation ====="
@@ -71,7 +96,6 @@ jobs:
       - name: Create Win7 PATH Hook
         shell: bash -el {0}
         run: |
-          echo "Creating Win7 PATH fixer..."
           cat > rthook_win7.py << 'HOOK_EOF'
           import os
           import sys
@@ -108,7 +132,7 @@ jobs:
           
           echo "===== Build Output ====="
           ls -lh dist/
-          # 注意：你的 Spec 文件生成的文件夹名是 StepToStl_Folder
+          # 你的 spec 文件生成的文件夹名是 StepToStl_Folder
           ls -lh dist/StepToStl_Folder/ || true
 
       - name: Test executable
@@ -117,14 +141,14 @@ jobs:
           PYTHONUTF8: 1
         run: |
           echo "===== Testing Executable ====="
-          # 注意文件名大小写 StepToStl.exe
+          # 注意文件名和路径大小写
           ./dist/StepToStl_Folder/StepToStl.exe --help || echo "Help test completed"
 
       - name: Pack Windows ZIP
         shell: bash -el {0}
         run: |
           cd dist
-          # 压缩生成的 StepToStl_Folder 文件夹
+          # 压缩 StepToStl_Folder 文件夹
           7z a -tzip step2stl-windows-x64.zip StepToStl_Folder/
 
       - name: Upload Windows Folder
@@ -158,16 +182,13 @@ jobs:
       - name: Install Dependencies
         shell: bash -el {0}
         run: |
-          echo "===== Installing Conda Dependencies ====="
           conda install -y -c conda-forge \
             ocp>=${{ env.OCP_VERSION_MAC }} \
             trimesh \
             numpy
           
-          echo "===== Installing PyInstaller via Pip ====="
           python -m pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
           
-          echo "===== Verifying OCP Installation ====="
           python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
 
       - name: Create Dummy Hooks
@@ -181,13 +202,11 @@ jobs:
         run: |
           pyinstaller --clean --log-level=INFO step2stl.spec
           ls -lh dist/
-          # 检查生成的文件夹 StepToStl_Folder
           ls -lh dist/StepToStl_Folder/ || true
 
       - name: Test executable
         shell: bash -el {0}
         run: |
-          # Mac 下可执行文件没有 .exe 后缀
           chmod +x dist/StepToStl_Folder/StepToStl
           ./dist/StepToStl_Folder/StepToStl --help || echo "Help test completed"
         continue-on-error: true
@@ -196,7 +215,7 @@ jobs:
         shell: bash -el {0}
         run: |
           cd dist
-          # 修正文件夹名称
+          # 这里之前报错是因为找不到 step2stl/，现在修正为 StepToStl_Folder/
           zip -r -9 step2stl-macos-arm64.zip StepToStl_Folder/
 
       - name: Upload macOS ARM64
@@ -224,16 +243,13 @@ jobs:
       - name: Install Dependencies
         shell: bash -el {0}
         run: |
-          echo "===== Installing Conda Dependencies ====="
           conda install -y -c conda-forge \
             ocp>=${{ env.OCP_VERSION_MAC }} \
             trimesh \
             numpy
           
-          echo "===== Installing PyInstaller via Pip ====="
           python -m pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
           
-          echo "===== Verifying OCP Installation ====="
           python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
 
       - name: Create Dummy Hooks

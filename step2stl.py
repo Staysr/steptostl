@@ -424,6 +424,137 @@ class StepToStlConverter:
         
         print(f"   识别到 {len(parts)} 个唯一 SOLID 部件")
         return parts
+
+    def collect_parts_recursive(self, shape_tool, doc) -> List[Dict]:
+        """递归收集所有唯一部件（修复螺丝帽丢失问题）"""
+        parts = []
+        name_counter: Dict[str, int] = {}
+        processed_shapes: Set[int] = set()
+        
+        def process_label_recursive(label, parent_name=""):
+            """递归处理标签（兼容 7.5.3）"""
+            
+            # 获取引用的真实标签
+            ref_label = label
+            try:
+                if shape_tool.IsReference_s(label):
+                    shape_tool.GetReferredShape_s(label, ref_label)
+            except AttributeError:
+                try:
+                    if XCAFDoc_ShapeTool.IsReference_s(label):
+                        XCAFDoc_ShapeTool.GetReferredShape_s(label, ref_label)
+                except:
+                    pass
+            
+            # 获取名称
+            raw_name = self.get_label_name(ref_label, shape_tool)
+            if not raw_name:
+                raw_name = self.get_label_name(label, shape_tool)
+            if not raw_name:
+                raw_name = "Part"
+            
+            full_name = f"{parent_name}_{raw_name}" if parent_name else raw_name
+            
+            # 检查是否是装配体
+            is_assembly = False
+            try:
+                is_assembly = shape_tool.IsAssembly_s(ref_label)
+            except AttributeError:
+                try:
+                    is_assembly = XCAFDoc_ShapeTool.IsAssembly_s(ref_label)
+                except:
+                    pass
+            
+            if is_assembly:
+                # 递归处理装配体的所有组件
+                components = TDF_LabelSequence()
+                try:
+                    shape_tool.GetComponents_s(ref_label, components, False)
+                except AttributeError:
+                    try:
+                        shape_tool.GetComponents(ref_label, components, False)
+                    except:
+                        pass
+                
+                for i in range(1, components.Length() + 1):
+                    comp_label = components.Value(i)
+                    process_label_recursive(comp_label, full_name)
+            else:
+                # 处理叶子节点（实际部件）
+                shape = self.get_shape_from_label(ref_label, shape_tool)
+                
+                if shape is None or shape.IsNull():
+                    return
+                
+                shape_type = shape.ShapeType()
+                
+                # ✅ 关键修复：处理 SOLID 和 COMPOUND
+                if shape_type == TopAbs_SOLID:
+                    shape_hash = self.get_shape_hash(shape)
+                    
+                    if shape_hash not in processed_shapes:
+                        processed_shapes.add(shape_hash)
+                        
+                        safe_name = self.sanitize_filename(raw_name)
+                        name_lower = safe_name.lower()
+                        if name_lower not in name_counter:
+                            name_counter[name_lower] = 0
+                        name_counter[name_lower] += 1
+                        
+                        unique_name = f"{safe_name}_{name_counter[name_lower]}"
+                        
+                        parts.append({
+                            'shape': shape,
+                            'name': unique_name,
+                            'raw_name': raw_name
+                        })
+                
+                elif shape_type == TopAbs_COMPOUND:
+                    # ✅ 从 COMPOUND 中提取嵌套的 SOLID（螺丝帽可能在这里）
+                    explorer = TopExp_Explorer(shape, TopAbs_SOLID)
+                    solid_idx = 0
+                    
+                    while explorer.More():
+                        solid = explorer.Current()
+                        solid_hash = self.get_shape_hash(solid)
+                        
+                        if solid_hash not in processed_shapes:
+                            processed_shapes.add(solid_hash)
+                            solid_idx += 1
+                            
+                            solid_name = f"{raw_name}_Part{solid_idx}"
+                            safe_name = self.sanitize_filename(solid_name)
+                            
+                            name_lower = safe_name.lower()
+                            if name_lower not in name_counter:
+                                name_counter[name_lower] = 0
+                            name_counter[name_lower] += 1
+                            
+                            unique_name = f"{safe_name}_{name_counter[name_lower]}"
+                            
+                            parts.append({
+                                'shape': solid,
+                                'name': unique_name,
+                                'raw_name': solid_name
+                            })
+                        
+                        explorer.Next()
+        
+        # 从根形状开始递归
+        free_shapes = TDF_LabelSequence()
+        try:
+            shape_tool.GetFreeShapes_s(free_shapes)
+        except:
+            shape_tool.GetFreeShapes(free_shapes)
+        
+        print(f"   找到 {free_shapes.Length()} 个根形状")
+        
+        for i in range(1, free_shapes.Length() + 1):
+            root_label = free_shapes.Value(i)
+            process_label_recursive(root_label)
+        
+        # print(f"   递归提取到 {len(parts)} 个唯一 SOLID 部件")
+        return parts
     
     def get_bounding_box_size(self, shape): 
         """获取模型包围盒尺寸""" 
@@ -673,7 +804,8 @@ class StepToStlConverter:
         print("\n[部件模式] 拆分装配体...")
         
         # 收集所有唯一部件
-        parts = self.collect_parts(shape_tool, doc)
+        # parts = self.collect_parts(shape_tool, doc)
+        parts = self.collect_parts_recursive(shape_tool, doc)
         
         if not parts:
             print("ERROR: 未找到任何部件")
