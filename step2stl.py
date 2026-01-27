@@ -308,98 +308,121 @@ class StepToStlConverter:
                     })
                 
                 explorer.Next()
+
+    def export_part_glb_native(self, shape, glb_path: Path, linear_def: float) -> Optional[Path]:
+        """使用 OCP 原生方法导出单个部件到 GLB（兼容 7.5.3）"""
+        if not GLB_AVAILABLE:
+            return None
+        
+        try:
+            # 为单个部件创建临时 XCAF 文档
+            app = XCAFApp_Application.GetApplication_s()
+            temp_doc = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
+            
+            temp_shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(temp_doc.Main())
+            
+            # 添加形状（兼容 7.5.3 和 7.7.2）
+            part_label = None
+            try:
+                # 7.7.2+ 新版 API
+                part_label = temp_shape_tool.AddShape_s(shape)
+            except AttributeError:
+                try:
+                    # 7.5.3 旧版 API（实例方法）
+                    part_label = temp_shape_tool.AddShape(shape)
+                except AttributeError:
+                    try:
+                        # 静态方法尝试
+                        part_label = XCAFDoc_ShapeTool.AddShape_s(shape)
+                    except:
+                        part_label = XCAFDoc_ShapeTool.AddShape(shape)
+            
+            if part_label is None:
+                return None
+            
+            # 确保已网格化
+            mesh = BRepMesh_IncrementalMesh(shape, linear_def, False, self.angular_deflection, True)
+            mesh.Perform()
+            
+            if not mesh.IsDone():
+                return None
+            
+            # 导出 GLB（隐藏警告）
+            with suppress_output():
+                writer = RWGltf_CafWriter(TCollection_AsciiString(str(glb_path)), True)
+                file_info = TColStd_IndexedDataMapOfStringString()
+                progress = Message_ProgressRange()
+                result = writer.Perform(temp_doc, file_info, progress)
+            
+            if result and glb_path.exists() and glb_path.stat().st_size > 0:
+                return glb_path
+            return None
+            
+        except Exception as e:
+            # 调试输出（正式版可删除）
+            # print(f"DEBUG GLB native error: {e}")
+            return None
     
     def collect_parts(self, shape_tool, doc) -> List[Dict]:
-        """收集所有唯一的部件（避免重复）"""
+        """收集所有唯一的 SOLID 部件"""
         parts = []
-        processed_shapes: Set[int] = set()  # 记录已处理的形状
-        processed_labels: Set[int] = set()  # 记录已处理的标签
         name_counter: Dict[str, int] = {}
+        processed_shapes: Set[int] = set()
         
-        # 获取所有顶层形状（FreeShapes）
-        free_shapes = TDF_LabelSequence()
+        # 关键：使用 GetShapes 获取所有形状
+        all_labels = TDF_LabelSequence()
         try:
-            shape_tool.GetFreeShapes_s(free_shapes)
-        except:
+            shape_tool.GetShapes_s(all_labels)
+        except AttributeError:
             try:
-                shape_tool.GetFreeShapes(free_shapes)
+                shape_tool.GetShapes(all_labels)
             except:
                 pass
         
-        print(f"   顶层形状数量: {free_shapes.Length()}")
+        total = all_labels.Length()
+        print(f"   找到 {total} 个形状，筛选 SOLID...")
         
-        # 递归处理函数
-        def process_label(label, parent_name: str = ""):
-            label_hash = self.get_label_hash(label)
+        for i in range(1, total + 1):
+            label = all_labels.Value(i)
             
-            # 避免重复处理同一个标签
-            if label_hash in processed_labels:
-                return
-            processed_labels.add(label_hash)
+            shape = self.get_shape_from_label(label, shape_tool)
+            
+            if shape is None or shape.IsNull():
+                continue
+            
+            # 只处理 SOLID 类型
+            if shape.ShapeType() != TopAbs_SOLID:
+                continue
+            
+            # 去重
+            shape_hash = self.get_shape_hash(shape)
+            if shape_hash in processed_shapes:
+                continue
+            processed_shapes.add(shape_hash)
             
             # 获取名称
-            name = self.get_label_name(label, shape_tool)
-            if not name:
-                name = parent_name
+            raw_name = self.get_label_name(label, shape_tool)
+            if not raw_name:
+                raw_name = "Part"
             
-            # 检查是否是引用
-            is_ref = False
-            try:
-                is_ref = shape_tool.IsReference_s(label)
-            except:
-                try:
-                    is_ref = XCAFDoc_ShapeTool.IsReference_s(label)
-                except:
-                    pass
+            safe_name = self.sanitize_filename(raw_name)
             
-            # 如果是引用，获取真实的形状标签
-            if is_ref:
-                ref_label = label  # 临时变量
-                try:
-                    ref_label_seq = TDF_LabelSequence()
-                    # 获取引用的目标
-                    resolved = shape_tool.GetReferredShape_s(label, ref_label)
-                    if resolved:
-                        label = ref_label
-                except:
-                    pass
+            # 处理重名
+            name_lower = safe_name.lower()
+            if name_lower not in name_counter:
+                name_counter[name_lower] = 0
+            name_counter[name_lower] += 1
             
-            # 检查是否是装配体
-            is_assembly = False
-            try:
-                is_assembly = shape_tool.IsAssembly_s(label)
-            except:
-                try:
-                    is_assembly = XCAFDoc_ShapeTool.IsAssembly_s(label)
-                except:
-                    pass
+            count = name_counter[name_lower]
+            unique_name = f"{safe_name}_{count}"
             
-            if is_assembly:
-                # 获取子组件
-                components = TDF_LabelSequence()
-                try:
-                    shape_tool.GetComponents_s(label, components)
-                except:
-                    try:
-                        XCAFDoc_ShapeTool.GetComponents_s(label, components)
-                    except:
-                        pass
-                
-                for i in range(1, components.Length() + 1):
-                    comp_label = components.Value(i)
-                    process_label(comp_label, name)
-            else:
-                # 获取形状并提取 SOLID
-                shape = self.get_shape_from_label(label, shape_tool)
-                if shape and not shape.IsNull():
-                    self.extract_parts_from_shape(shape, name, parts, 
-                                                  processed_shapes, name_counter)
+            parts.append({
+                'shape': shape,
+                'name': unique_name,
+                'raw_name': raw_name
+            })
         
-        # 处理所有顶层形状
-        for i in range(1, free_shapes.Length() + 1):
-            label = free_shapes.Value(i)
-            process_label(label, "")
-        
+        print(f"   识别到 {len(parts)} 个唯一 SOLID 部件")
         return parts
     
     def get_bounding_box_size(self, shape): 
@@ -446,7 +469,7 @@ class StepToStlConverter:
             )
             mesh.Perform()
             return mesh.IsDone()
-        except:
+        except Exception as e:
             return False
     
     def convert_shape_to_stl(self, shape, output_path: Path, ascii_mode: bool = False) -> bool:
@@ -455,7 +478,8 @@ class StepToStlConverter:
             stl_api = StlAPI()
             success = stl_api.Write_s(shape, str(output_path), ascii_mode)
             return success and output_path.exists() and output_path.stat().st_size > 0
-        except:
+        except Exception as e:
+            # print(f"DEBUG STL转换 native error: {e}")
             return False
     
     def optimize_stl(self, stl_path: Path) -> Optional[Path]: 
@@ -614,15 +638,18 @@ class StepToStlConverter:
             glb_path = output_file.with_suffix('.glb')
             print(f"   导出 GLB: {glb_path.name}...", end='', flush=True)
             
-            glb_file = self.export_glb_native(doc, glb_path)
-            if glb_file is None:
+            if GLB_AVAILABLE:
+                glb_file = self.export_glb_native(doc, glb_path)
+
+            # 如果原生失败，尝试 trimesh
+            if glb_file is None and TRIMESH_AVAILABLE:
                 glb_file = self.export_glb_trimesh(output_file, glb_path)
-            
+
             if glb_file:
                 glb_size = glb_file.stat().st_size / (1024 * 1024)
                 print(f" OK ({glb_size:.2f} MB)")
             else:
-                print(" FAILED")
+                print(" FAILED (需要 trimesh 或 OCP GLB 支持)")
         
         if auto_zip:
             print("   压缩文件...")
@@ -640,8 +667,8 @@ class StepToStlConverter:
         return True
     
     def convert_parts(self, input_file: Path, output_file: Path, doc, shape_tool,
-                     ascii_mode: bool, optimize: bool, export_glb: bool,
-                     linear_def: float) -> bool:
+                 ascii_mode: bool, optimize: bool, export_glb: bool,
+                 linear_def: float) -> bool:
         """拆分部件并转换"""
         print("\n[部件模式] 拆分装配体...")
         
@@ -665,70 +692,81 @@ class StepToStlConverter:
         
         success_count = 0
         failed_count = 0
-        stl_files = []
-        glb_tasks = []
         
         BATCH_SIZE = 50
         
+        # 第一步：网格化和导出 STL
         for idx, part in enumerate(parts, 1):
             shape = part['shape']
             name = part['name']
             raw_name = part['raw_name']
             
-            # 简化输出
-            if idx <= 10 or idx == len(parts) or idx % 100 == 0:
-                print(f"\n--- 部件 [{idx}/{len(parts)}]: {raw_name} ---")
-            elif idx == 11:
-                print(f"\n... 处理中 ...")
-            
             # 网格化
             if not self.mesh_shape(shape, linear_def):
                 failed_count += 1
+                part['success'] = False
                 continue
             
             # 导出 STL
             stl_path = temp_dir_stl / f"{name}.stl"
             
             if self.convert_shape_to_stl(shape, stl_path, ascii_mode):
-                stl_files.append(stl_path)
+                # 关键：保存 stl_path 到 part 字典
+                part['stl_path'] = stl_path
+                part['success'] = True
                 success_count += 1
-                
-                if export_glb and temp_dir_glb:
-                    glb_tasks.append((stl_path, temp_dir_glb / f"{name}.glb"))
                 
                 if idx <= 10 or idx == len(parts):
                     stl_size = stl_path.stat().st_size / (1024 * 1024)
                     print(f"   STL: {stl_path.name} ({stl_size:.2f} MB)")
             else:
+                part['success'] = False
                 failed_count += 1
             
             if idx % BATCH_SIZE == 0:
                 gc.collect()
+                print(f"   STL 进度: {idx}/{len(parts)}")
         
         print(f"\nSTL 转换完成: 成功 {success_count}, 失败 {failed_count}")
         
         # 优化 STL
-        if optimize and stl_files:
-            print(f"\n优化 {len(stl_files)} 个 STL 文件...")
-            for stl_path in stl_files:
-                self.optimize_stl(stl_path)
+        if optimize:
+            stl_files = [p['stl_path'] for p in parts if p.get('stl_path')]
+            if stl_files:
+                print(f"\n优化 {len(stl_files)} 个 STL 文件...")
+                for stl_path in stl_files:
+                    self.optimize_stl(stl_path)
         
         gc.collect()
         
-        # 批量生成 GLB
-        if export_glb and glb_tasks:
-            print(f"\n生成 {len(glb_tasks)} 个 GLB 文件...")
+        # 第二步：生成 GLB
+        if export_glb and temp_dir_glb:
+            # 获取成功的部件
+            success_parts = [p for p in parts if p.get('success') and p.get('stl_path')]
+            print(f"\n生成 {len(success_parts)} 个 GLB 文件...")
             glb_success = 0
             
-            for idx, (stl_path, glb_path) in enumerate(glb_tasks, 1):
-                result = self.export_glb_trimesh(stl_path, glb_path)
+            for idx, part in enumerate(success_parts, 1):
+                stl_path = part['stl_path']
+                glb_path = temp_dir_glb / f"{part['name']}.glb"
+                result = None
+                
+                # 优先使用 trimesh（因为已经有 STL 了）
+                if TRIMESH_AVAILABLE:
+                    result = self.export_glb_trimesh(stl_path, glb_path)
+                
+                # 如果 trimesh 失败，尝试 OCP 原生
+                if result is None and GLB_AVAILABLE:
+                    result = self.export_part_glb_native(part['shape'], glb_path, linear_def)
+                
                 if result:
                     glb_success += 1
                 
                 if idx % BATCH_SIZE == 0:
                     gc.collect()
+                    print(f"   GLB 进度: {idx}/{len(success_parts)}")
             
-            print(f"GLB 转换完成: 成功 {glb_success}/{len(glb_tasks)}")
+            print(f"GLB 转换完成: 成功 {glb_success}/{len(success_parts)}")
         
         gc.collect()
         time.sleep(0.5)
@@ -1026,10 +1064,6 @@ def main():
    high   - 高质量
    ultra  - 超高质量 (最慢)
 
-依赖安装:
-   Windows 7:  pip install cadquery-ocp==7.5.3
-   Mac M2:     pip install cadquery-ocp
-   优化功能:   pip install trimesh numpy
         """
     )
     
@@ -1073,13 +1107,15 @@ def main():
     
     args = parser.parse_args()
     
+    # 检查优化功能依赖（不再提示确认）
     if args.optimize and not TRIMESH_AVAILABLE:
-        print("WARNING: 优化需要安装 trimesh", file=sys.stderr)
-        # print("   安装命令: pip install trimesh numpy", file=sys.stderr)
-        # response = input("是否继续? (y/n): ")
-        # if response.lower() != 'y':
-        #     sys.exit(EXIT_ERROR_IMPORT)
-        # args.optimize = False
+        print("WARNING: 优化需要安装 trimesh，已跳过优化", file=sys.stderr)
+        args.optimize = False
+
+    # GLB 导出检查
+    if args.glb and not GLB_AVAILABLE and not TRIMESH_AVAILABLE:
+        print("WARNING: GLB导出需要 OCP GLB 支持或 trimesh", file=sys.stderr)
+        print("   OCP 原生 GLB 导出已启用" if GLB_AVAILABLE else "   请安装: pip install trimesh", file=sys.stderr)
     
     converter = StepToStlConverter(
         quality=args.quality,

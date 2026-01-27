@@ -1,26 +1,24 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""
-PyInstaller spec file for step2stl (cadquery-ocp/OCP version)
-输出: step2stl 文件夹，包含 step2stl.exe 和 _internal 目录
-"""
 
 import sys
 import os
 
 # =========================================================
-#                    配置区域
+#                    用户配置区域
 # =========================================================
 
-# 你的脚本文件名
-SCRIPT_NAME = 'step2stl_win7.py'
-
-# 生成的可执行文件名
-EXE_NAME = 'step2stl'
-
-# 打包模式：False = 文件夹模式 (生成 _internal 目录)
+# [开关] True = 打包成单个EXE (体积最小，便于分发)
+#        False = 打包成文件夹 (启动最快，便于调试)
 BUILD_MODE_ONEFILE = False
 
-# 是否使用 UPX 压缩
+# 你的脚本文件名
+SCRIPT_NAME = 'step2stl.py'
+
+# 生成的 EXE 名字
+EXE_NAME = 'StepToStl'
+
+# 是否使用 UPX 压缩 (需要你下载 upx.exe 放在目录里，没有则设为 False)
+# 建议设为 False 以避免 Win7 下极个别兼容性问题，除非你非常在意体积
 USE_UPX = False
 
 # =========================================================
@@ -29,63 +27,22 @@ USE_UPX = False
 
 block_cipher = None
 
-# OCP 相关的隐藏导入 (根据你的代码使用情况)
-ocp_hidden_imports = [
-    'OCP',
-    'OCP.STEPCAFControl',
-    'OCP.StlAPI',
-    'OCP.BRepMesh',
-    'OCP.IFSelect',
-    'OCP.Bnd',
-    'OCP.BRepBndLib',
-    'OCP.TDocStd',
-    'OCP.XCAFApp',
-    'OCP.TCollection',
-    'OCP.XCAFDoc',
-    'OCP.TDF',
-    'OCP.TDataStd',
-    'OCP.TopAbs',
-    'OCP.TopoDS',
-    'OCP.TopExp',
-    'OCP.RWGltf',
-    'OCP.TColStd',
-    'OCP.Message',
-    'OCP.gp',
-    'OCP.BRep',
-    'OCP.BRepBuilderAPI',
-    'OCP.Geom',
-    'OCP.GeomAbs',
-    'OCP.Standard',
-    'OCP.Quantity',
-]
-
-# 运行时钩子
-runtime_hooks_list = []
-if os.path.exists('rthook_win7.py'):
-    runtime_hooks_list.append('rthook_win7.py')
-if os.path.exists('rthook_encoding.py'):
-    runtime_hooks_list.append('rthook_encoding.py')
-
-# hook 目录 (如果有 hook-OCC.py)
-hooks_path = []
-if os.path.exists('hook-OCC.py'):
-    hooks_path = ['.']
-
 # 1. 分析依赖
 a = Analysis(
     [SCRIPT_NAME],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=ocp_hidden_imports,
-    hookspath=hooks_path,
+    # 强制包含 OCP，防止 PyInstaller 找不到
+    hiddenimports=['OCP'],
+    hookspath=[],
     hooksconfig={},
-    runtime_hooks=runtime_hooks_list,
+    runtime_hooks=[],
+    # 剔除不必要的标准库，大幅减小体积
     excludes=[
         'tkinter', 'test', 'unittest', 'email', 'http',
         'xmlrpc', 'html', 'pydoc', 'pdb', 'distutils',
-        'matplotlib', 'scipy', 'PIL', 'IPython', 'jupyter',
-        'PyQt5', 'PyQt6', 'PySide2', 'PySide6', 'wx',
+        'matplotlib', 'scipy', 'numpy', 'PIL' # 如果你的代码没用到这些，排除它们
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -112,19 +69,19 @@ if BUILD_MODE_ONEFILE:
         strip=False,
         upx=USE_UPX,
         upx_exclude=[],
-        runtime_tmpdir=None,
-        console=True,
+        runtime_tmpdir=None, # 默认解压到临时目录
+        console=True,        # 开启黑框显示进度
         disable_windowed_traceback=False,
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
     )
 else:
-    # --- 文件夹模式 (OneDir) - 生成 _internal 结构 ---
+    # --- 文件夹模式 (OneDir) ---
     exe = EXE(
         pyz,
         a.scripts,
-        [],
+        [], # 注意：文件夹模式这里不包含二进制文件
         exclude_binaries=True,
         name=EXE_NAME,
         debug=False,
@@ -137,8 +94,7 @@ else:
         codesign_identity=None,
         entitlements_file=None,
     )
-
-    # 收集到文件夹 (名称为 step2stl)
+    # 收集文件夹
     coll = COLLECT(
         exe,
         a.binaries,
@@ -147,5 +103,5 @@ else:
         strip=False,
         upx=USE_UPX,
         upx_exclude=[],
-        name=EXE_NAME,  # 生成的文件夹名字：step2stl
+        name=EXE_NAME + '_Folder', # 生成的文件夹名字
     )

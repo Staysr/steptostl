@@ -17,10 +17,10 @@ on:
 
 env:
   PYTHON_WIN: "3.8"
-  OCP_VERSION_WIN: "7.5.3.0"
+  OCP_VERSION_WIN: "7.5.3"
   PYTHON_MAC: "3.9"
   OCP_VERSION_MAC: "7.7.2"
-  PYINSTALLER_VERSION: "6.9.0"
+  PYINSTALLER_VERSION: "5.13.2"
   PYTHONIOENCODING: "utf-8"
   PYTHONUTF8: "1"
 
@@ -41,25 +41,30 @@ jobs:
           auto-update-conda: true
           python-version: ${{ env.PYTHON_WIN }}
           architecture: x64
-          channels: conda-forge,defaults
-          channel-priority: strict
+          # Windows 下通常 cadquery 相关的包在 conda-forge 或 cadquery 通道
+          channels: conda-forge, defaults
+          channel-priority: flexible # 放宽优先级，避免死锁
 
-      - name: Install all dependencies with conda
+      - name: Install Dependencies
         shell: bash -el {0}
         run: |
-          echo "===== Installing Dependencies ====="
-          python --version
-          
-          # 使用 conda 安装所有依赖，避免 pip 版本解析问题
+          echo "===== Installing Conda Dependencies ====="
+          # 1. 先只用 Conda 装 OCP 和科学计算库 (分离安装避免冲突)
+          # 注意：OCP 7.5.3 比较老，有时候需显式指定 cadquery 通道，或者只用 conda-forge
           conda install -y -c conda-forge \
             ocp=${{ env.OCP_VERSION_WIN }} \
-            pyinstaller=${{ env.PYINSTALLER_VERSION }} \
             trimesh \
             "numpy<2.0"
           
-          echo "===== Verifying OCP Installation ====="
+          echo "===== Installing PyInstaller via Pip ====="
+          # 2. 用 Pip 安装 PyInstaller，绕过 Conda 的依赖地狱
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
+          
+          echo "===== Verifying Installation ====="
+          python --version
+          pyinstaller --version
           python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
-          python -c "from OCP.StlAPI import StlAPI_Writer; print('StlAPI import OK')"
 
       - name: Create Win7 PATH Hook
         shell: bash -el {0}
@@ -97,14 +102,7 @@ jobs:
         shell: bash -el {0}
         run: |
           echo "===== Starting Build ====="
-          ls -lh rthook_*.py
-          
-          if [ -f "hook-OCC.py" ]; then
-            echo "hook-OCC.py found"
-            ls -lh hook-OCC.py
-          fi
-          
-          pyinstaller --log-level=INFO step2stl.spec
+          pyinstaller --clean --log-level=INFO step2stl.spec
           
           echo "===== Build Output ====="
           ls -lh dist/
@@ -149,20 +147,22 @@ jobs:
           auto-update-conda: true
           python-version: ${{ env.PYTHON_MAC }}
           architecture: arm64
-          channels: conda-forge,defaults
-          channel-priority: strict
+          channels: conda-forge, defaults
+          channel-priority: flexible # 解决 Mac 的优先级报错
 
-      - name: Install all dependencies with conda
+      - name: Install Dependencies
         shell: bash -el {0}
         run: |
-          echo "===== Installing Dependencies ====="
-          python --version
-          
+          echo "===== Installing Conda Dependencies ====="
+          # 1. Conda 只装 OCP
           conda install -y -c conda-forge \
             ocp>=${{ env.OCP_VERSION_MAC }} \
-            pyinstaller=${{ env.PYINSTALLER_VERSION }} \
             trimesh \
             numpy
+          
+          echo "===== Installing PyInstaller via Pip ====="
+          # 2. Pip 装 PyInstaller
+          python -m pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
           
           echo "===== Verifying OCP Installation ====="
           python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
@@ -176,7 +176,7 @@ jobs:
       - name: Build Binary
         shell: bash -el {0}
         run: |
-          pyinstaller --log-level=INFO step2stl.spec
+          pyinstaller --clean --log-level=INFO step2stl.spec
           ls -lh dist/
           ls -lh dist/step2stl/ || true
 
@@ -212,20 +212,20 @@ jobs:
           auto-update-conda: true
           python-version: ${{ env.PYTHON_MAC }}
           architecture: x64
-          channels: conda-forge,defaults
-          channel-priority: strict
+          channels: conda-forge, defaults
+          channel-priority: flexible # 解决 Mac 的优先级报错
 
-      - name: Install all dependencies with conda
+      - name: Install Dependencies
         shell: bash -el {0}
         run: |
-          echo "===== Installing Dependencies ====="
-          python --version
-          
+          echo "===== Installing Conda Dependencies ====="
           conda install -y -c conda-forge \
             ocp>=${{ env.OCP_VERSION_MAC }} \
-            pyinstaller=${{ env.PYINSTALLER_VERSION }} \
             trimesh \
             numpy
+          
+          echo "===== Installing PyInstaller via Pip ====="
+          python -m pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
           
           echo "===== Verifying OCP Installation ====="
           python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
@@ -239,7 +239,7 @@ jobs:
       - name: Build Binary
         shell: bash -el {0}
         run: |
-          pyinstaller --log-level=INFO step2stl.spec
+          pyinstaller --clean --log-level=INFO step2stl.spec
           ls -lh dist/
           ls -lh dist/step2stl/ || true
 
