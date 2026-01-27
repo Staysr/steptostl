@@ -20,6 +20,7 @@ env:
   OCP_VERSION_WIN: "7.5.3"
   PYTHON_MAC: "3.9"
   OCP_VERSION_MAC: "7.7.2"
+  # 使用 5.13.2 以获得最佳的 Win7 兼容性
   PYINSTALLER_VERSION: "5.13.2"
   PYTHONIOENCODING: "utf-8"
   PYTHONUTF8: "1"
@@ -41,30 +42,31 @@ jobs:
           auto-update-conda: true
           python-version: ${{ env.PYTHON_WIN }}
           architecture: x64
-          # Windows 下通常 cadquery 相关的包在 conda-forge 或 cadquery 通道
           channels: conda-forge, defaults
-          channel-priority: flexible # 放宽优先级，避免死锁
+          channel-priority: flexible
 
       - name: Install Dependencies
         shell: bash -el {0}
         run: |
           echo "===== Installing Conda Dependencies ====="
-          # 1. 先只用 Conda 装 OCP 和科学计算库 (分离安装避免冲突)
-          # 注意：OCP 7.5.3 比较老，有时候需显式指定 cadquery 通道，或者只用 conda-forge
+          # 1. 安装 OCP
           conda install -y -c conda-forge \
             ocp=${{ env.OCP_VERSION_WIN }} \
             trimesh \
             "numpy<2.0"
           
+          echo "===== Fixing Broken Metadata (Windows Specific) ====="
+          # 关键步骤：OCP 7.5.3 带来的 vtk 包有错误的元数据，会导致 pip 崩溃
+          # 我们直接删除 vtk 的元数据文件夹，这样 pip 就看不到它了，也就不会报错
+          rm -rf $CONDA_PREFIX/Lib/site-packages/vtk-*.dist-info || true
+          
           echo "===== Installing PyInstaller via Pip ====="
-          # 2. 用 Pip 安装 PyInstaller，绕过 Conda 的依赖地狱
-          python -m pip install --upgrade pip
+          # 2. 安装 PyInstaller (不要升级 pip，使用自带的即可)
           python -m pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
           
           echo "===== Verifying Installation ====="
-          python --version
-          pyinstaller --version
           python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
+          pyinstaller --version
 
       - name: Create Win7 PATH Hook
         shell: bash -el {0}
@@ -106,7 +108,8 @@ jobs:
           
           echo "===== Build Output ====="
           ls -lh dist/
-          ls -lh dist/step2stl/ || true
+          # 注意：你的 Spec 文件生成的文件夹名是 StepToStl_Folder
+          ls -lh dist/StepToStl_Folder/ || true
 
       - name: Test executable
         shell: bash -el {0}
@@ -114,19 +117,21 @@ jobs:
           PYTHONUTF8: 1
         run: |
           echo "===== Testing Executable ====="
-          ./dist/step2stl/step2stl.exe --help || echo "Help test completed"
+          # 注意文件名大小写 StepToStl.exe
+          ./dist/StepToStl_Folder/StepToStl.exe --help || echo "Help test completed"
 
       - name: Pack Windows ZIP
         shell: bash -el {0}
         run: |
           cd dist
-          7z a -tzip step2stl-windows-x64.zip step2stl/
+          # 压缩生成的 StepToStl_Folder 文件夹
+          7z a -tzip step2stl-windows-x64.zip StepToStl_Folder/
 
       - name: Upload Windows Folder
         uses: actions/upload-artifact@v4
         with:
           name: step2stl-windows-x64
-          path: dist/step2stl/
+          path: dist/StepToStl_Folder/
 
       - name: Upload Windows ZIP
         uses: actions/upload-artifact@v4
@@ -148,20 +153,18 @@ jobs:
           python-version: ${{ env.PYTHON_MAC }}
           architecture: arm64
           channels: conda-forge, defaults
-          channel-priority: flexible # 解决 Mac 的优先级报错
+          channel-priority: flexible
 
       - name: Install Dependencies
         shell: bash -el {0}
         run: |
           echo "===== Installing Conda Dependencies ====="
-          # 1. Conda 只装 OCP
           conda install -y -c conda-forge \
             ocp>=${{ env.OCP_VERSION_MAC }} \
             trimesh \
             numpy
           
           echo "===== Installing PyInstaller via Pip ====="
-          # 2. Pip 装 PyInstaller
           python -m pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
           
           echo "===== Verifying OCP Installation ====="
@@ -178,20 +181,23 @@ jobs:
         run: |
           pyinstaller --clean --log-level=INFO step2stl.spec
           ls -lh dist/
-          ls -lh dist/step2stl/ || true
+          # 检查生成的文件夹 StepToStl_Folder
+          ls -lh dist/StepToStl_Folder/ || true
 
       - name: Test executable
         shell: bash -el {0}
         run: |
-          chmod +x dist/step2stl/step2stl
-          ./dist/step2stl/step2stl --help || echo "Help test completed"
+          # Mac 下可执行文件没有 .exe 后缀
+          chmod +x dist/StepToStl_Folder/StepToStl
+          ./dist/StepToStl_Folder/StepToStl --help || echo "Help test completed"
         continue-on-error: true
 
       - name: Pack macOS ZIP
         shell: bash -el {0}
         run: |
           cd dist
-          zip -r -9 step2stl-macos-arm64.zip step2stl/
+          # 修正文件夹名称
+          zip -r -9 step2stl-macos-arm64.zip StepToStl_Folder/
 
       - name: Upload macOS ARM64
         uses: actions/upload-artifact@v4
@@ -213,7 +219,7 @@ jobs:
           python-version: ${{ env.PYTHON_MAC }}
           architecture: x64
           channels: conda-forge, defaults
-          channel-priority: flexible # 解决 Mac 的优先级报错
+          channel-priority: flexible
 
       - name: Install Dependencies
         shell: bash -el {0}
@@ -241,20 +247,20 @@ jobs:
         run: |
           pyinstaller --clean --log-level=INFO step2stl.spec
           ls -lh dist/
-          ls -lh dist/step2stl/ || true
+          ls -lh dist/StepToStl_Folder/ || true
 
       - name: Test executable
         shell: bash -el {0}
         run: |
-          chmod +x dist/step2stl/step2stl
-          ./dist/step2stl/step2stl --help || echo "Help test completed"
+          chmod +x dist/StepToStl_Folder/StepToStl
+          ./dist/StepToStl_Folder/StepToStl --help || echo "Help test completed"
         continue-on-error: true
 
       - name: Pack macOS ZIP
         shell: bash -el {0}
         run: |
           cd dist
-          zip -r -9 step2stl-macos-x64.zip step2stl/
+          zip -r -9 step2stl-macos-x64.zip StepToStl_Folder/
 
       - name: Upload macOS x64
         uses: actions/upload-artifact@v4
