@@ -1258,7 +1258,7 @@ class StepToStlConverter:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='STEP/STP 转 STL/GLB 转换工具 (cadquery-ocp)',
+        description='STEP/STP/CatPart 转 STL/GLB 转换工具',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用示例:
