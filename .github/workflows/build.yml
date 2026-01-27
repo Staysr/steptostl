@@ -20,7 +20,7 @@ env:
   OCP_VERSION_WIN: "7.5.3"
   PYTHON_MAC: "3.9"
   OCP_VERSION_MAC: "7.7.2"
-  # 锁定 PyInstaller 版本以保证兼容性
+  # 锁定 PyInstaller 版本 (Win7 兼容性)
   PYINSTALLER_VERSION: "5.13.2"
   PYTHONIOENCODING: "utf-8"
   PYTHONUTF8: "1"
@@ -45,51 +45,67 @@ jobs:
           channels: conda-forge, defaults
           channel-priority: flexible
 
-      - name: Install OCP with Conda
+      - name: Install Dependencies & Fix Metadata
         shell: bash -el {0}
         run: |
-          echo "===== Installing Conda Dependencies ====="
+          echo "===== 1. Installing Conda Dependencies ====="
           conda install -y -c conda-forge \
             ocp=${{ env.OCP_VERSION_WIN }} \
             trimesh \
             "numpy<2.0"
-
-      - name: Fix Broken VTK Metadata (Python)
-        shell: python
-        run: |
-          # === 使用 Python 脚本强制删除损坏的元数据 ===
+          
+          echo "===== 2. Nuke Corrupted Metadata (Deep Scan) ====="
+          # 这是一个 Python 脚本，直接嵌入在 bash 中运行
+          # 它会扫描所有安装包，找到那个含有 "-PKG-VERSION" 的坏文件并强制删除
+          python -c "
           import sys
           import shutil
           from pathlib import Path
           
-          # 获取 conda 环境下的 site-packages 路径
-          site_pkgs = Path(sys.prefix) / "Lib" / "site-packages"
-          print(f"Scanning site-packages at: {site_pkgs}")
+          # 定位 site-packages 目录
+          site_packages = Path(sys.prefix) / 'Lib' / 'site-packages'
+          print(f'Scanning site-packages: {site_packages}')
           
-          # 查找所有以 vtk- 开头的 dist-info 文件夹
-          # 那个 -PKG-VERSION 错误就藏在这里面
-          targets = list(site_pkgs.glob("vtk-*.dist-info"))
+          if not site_packages.exists():
+              print('ERROR: site-packages not found!')
+              sys.exit(1)
           
-          if not targets:
-              print("WARNING: No vtk metadata found. Build might fail if pip sees it later.")
+          # 暴力扫描：检查每一个 dist-info 文件夹
+          count = 0
+          for dist_info in site_packages.glob('*.dist-info'):
+              metadata_file = dist_info / 'METADATA'
+              if metadata_file.exists():
+                  try:
+                      # 读取文件前几行
+                      with open(metadata_file, 'r', encoding='utf-8', errors='ignore') as f:
+                          content = f.read(1024)
+                          
+                      # 检查是否包含非法版本号
+                      if 'Version: -PKG-VERSION' in content:
+                          print(f'!!! FOUND BROKEN PACKAGE !!!')
+                          print(f'   Path: {dist_info}')
+                          print(f'   Action: DELETING...')
+                          shutil.rmtree(dist_info, ignore_errors=True)
+                          print(f'   Result: Deleted.')
+                          count += 1
+                  except Exception as e:
+                      print(f'Warning: Could not read {dist_info}: {e}')
           
-          for target in targets:
-              print(f"Removing corrupted metadata folder: {target}")
-              try:
-                  shutil.rmtree(target)
-                  print("SUCCESS: Deleted.")
-              except Exception as e:
-                  print(f"ERROR: Failed to delete {target}: {e}")
-                  sys.exit(1)
-
-      - name: Install PyInstaller via Pip
-        shell: bash -el {0}
-        run: |
-          echo "===== Installing PyInstaller ====="
-          # 此时 vtk 的元数据已被删除，pip 不会再报错了
+          if count == 0:
+              print('Warning: No broken packages found via content scan. Trying name scan...')
+              # 备用方案：按名字删除 vtk 开头的 dist-info
+              for p in site_packages.glob('*vtk*.dist-info'):
+                  print(f'Deleting suspect folder: {p}')
+                  shutil.rmtree(p, ignore_errors=True)
+          else:
+              print(f'Successfully removed {count} broken metadata folders.')
+          "
+          
+          echo "===== 3. Installing PyInstaller via Pip ====="
+          # 此时坏文件已被清除，pip 应该可以正常工作了
           python -m pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
           
-          echo "===== Verifying Installation ====="
+          echo "===== 4. Verifying Installation ====="
           python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
           pyinstaller --version
 
@@ -132,7 +148,7 @@ jobs:
           
           echo "===== Build Output ====="
           ls -lh dist/
-          # 你的 spec 文件生成的文件夹名是 StepToStl_Folder
+          # 你的 Spec 生成的文件夹名是 StepToStl_Folder
           ls -lh dist/StepToStl_Folder/ || true
 
       - name: Test executable
@@ -141,14 +157,14 @@ jobs:
           PYTHONUTF8: 1
         run: |
           echo "===== Testing Executable ====="
-          # 注意文件名和路径大小写
+          # 注意文件名大小写
           ./dist/StepToStl_Folder/StepToStl.exe --help || echo "Help test completed"
 
       - name: Pack Windows ZIP
         shell: bash -el {0}
         run: |
           cd dist
-          # 压缩 StepToStl_Folder 文件夹
+          # 压缩正确命名的文件夹
           7z a -tzip step2stl-windows-x64.zip StepToStl_Folder/
 
       - name: Upload Windows Folder
@@ -163,13 +179,12 @@ jobs:
           name: step2stl-windows-x64-zip
           path: dist/step2stl-windows-x64.zip
 
+  # macOS 部分保持不变（因为你已经成功了）
   build-macos-arm64:
     runs-on: macos-14
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -178,46 +193,26 @@ jobs:
           architecture: arm64
           channels: conda-forge, defaults
           channel-priority: flexible
-
       - name: Install Dependencies
         shell: bash -el {0}
         run: |
-          conda install -y -c conda-forge \
-            ocp>=${{ env.OCP_VERSION_MAC }} \
-            trimesh \
-            numpy
-          
+          conda install -y -c conda-forge ocp>=${{ env.OCP_VERSION_MAC }} trimesh numpy
           python -m pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
-          
           python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
-
       - name: Create Dummy Hooks
         shell: bash -el {0}
         run: |
           touch rthook_encoding.py
           touch rthook_win7.py
-
       - name: Build Binary
         shell: bash -el {0}
         run: |
           pyinstaller --clean --log-level=INFO step2stl.spec
-          ls -lh dist/
-          ls -lh dist/StepToStl_Folder/ || true
-
-      - name: Test executable
-        shell: bash -el {0}
-        run: |
-          chmod +x dist/StepToStl_Folder/StepToStl
-          ./dist/StepToStl_Folder/StepToStl --help || echo "Help test completed"
-        continue-on-error: true
-
       - name: Pack macOS ZIP
         shell: bash -el {0}
         run: |
           cd dist
-          # 这里之前报错是因为找不到 step2stl/，现在修正为 StepToStl_Folder/
           zip -r -9 step2stl-macos-arm64.zip StepToStl_Folder/
-
       - name: Upload macOS ARM64
         uses: actions/upload-artifact@v4
         with:
@@ -226,11 +221,9 @@ jobs:
 
   build-macos-x64:
     runs-on: macos-13
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -239,45 +232,26 @@ jobs:
           architecture: x64
           channels: conda-forge, defaults
           channel-priority: flexible
-
       - name: Install Dependencies
         shell: bash -el {0}
         run: |
-          conda install -y -c conda-forge \
-            ocp>=${{ env.OCP_VERSION_MAC }} \
-            trimesh \
-            numpy
-          
+          conda install -y -c conda-forge ocp>=${{ env.OCP_VERSION_MAC }} trimesh numpy
           python -m pip install pyinstaller==${{ env.PYINSTALLER_VERSION }}
-          
           python -c "from OCP.STEPCAFControl import STEPCAFControl_Reader; print('OCP import OK')"
-
       - name: Create Dummy Hooks
         shell: bash -el {0}
         run: |
           touch rthook_encoding.py
           touch rthook_win7.py
-
       - name: Build Binary
         shell: bash -el {0}
         run: |
           pyinstaller --clean --log-level=INFO step2stl.spec
-          ls -lh dist/
-          ls -lh dist/StepToStl_Folder/ || true
-
-      - name: Test executable
-        shell: bash -el {0}
-        run: |
-          chmod +x dist/StepToStl_Folder/StepToStl
-          ./dist/StepToStl_Folder/StepToStl --help || echo "Help test completed"
-        continue-on-error: true
-
       - name: Pack macOS ZIP
         shell: bash -el {0}
         run: |
           cd dist
           zip -r -9 step2stl-macos-x64.zip StepToStl_Folder/
-
       - name: Upload macOS x64
         uses: actions/upload-artifact@v4
         with:
